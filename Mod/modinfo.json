@@ -1,0 +1,10 @@
+{
+  "id": "WillowWisp.CoopLeash",
+  "name": "Stick Together",
+  "version": "1.0.0",
+  "authors": "WillowWisp",
+  "description": "Teleport to co-op partners waiting in pipes",
+  "requirements": [],
+  "requirements_names": [],
+  "checksum_override_version": true
+}
