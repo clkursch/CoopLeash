@@ -147,7 +147,7 @@ public class CLOptions : OptionInterface
 		
 		
 		
-		lineCount -= 35;
+		lineCount -= 45;
 		dsc = Translate("Tamed slugpups will teleport to you as you enter pipes");
 		Tabs[0].AddItems(new UIelement[]
 		{

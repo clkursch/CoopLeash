@@ -140,7 +140,7 @@ public partial class CoopLeash : BaseUnityPlugin
             On.Player.JollyInputUpdate += Player_JollyInputUpdate;
             On.Player.checkInput += Player_checkInput;
             On.Player.TriggerCameraSwitch += Player_TriggerCameraSwitch;
-            On.Player.Destroy += Player_Destroy;
+            //On.Player.Destroy += Player_Destroy;
             On.RoomCamera.Update += RoomCamera_Update;
             On.ShortcutHandler.Update += ShortcutHandler_Update;
 
@@ -156,17 +156,6 @@ public partial class CoopLeash : BaseUnityPlugin
             throw;
         }
     }
-
-    private void Player_Destroy(On.Player.orig_Destroy orig, Player self)
-    {
-        if (self.slugcatStats.name.value == "thedronemaster")
-        {
-            float num = -self.bodyChunks[0].restrictInRoomRange + 1f;
-            if (self.bodyChunks[0].pos.y < Mathf.Max(num, -250f))
-                self.dead = true; //DRONEMASTER FORGETS TO DO THIS AND IT'S KIND OF IMPORTANT
-        }
-        orig.Invoke(self);
-    }
 	
 	//SWOLLOW ANYTHING IS WEIRD SO. DO THIS INSTEAD
 	public static bool SlugBackCheck(Player self)
@@ -174,24 +163,20 @@ public partial class CoopLeash : BaseUnityPlugin
 		return (ModManager.MSC || ModManager.CoopAvailable) && self.slugOnBack != null && !self.slugOnBack.interactionLocked && self.slugOnBack.slugcat == null && (self.spearOnBack == null || !self.spearOnBack.HasASpear);
 	}
 	
-	public static void ScoopPups(Room myRoom)
+	public static void ScoopPups(Room myRoom, IntVector2 pipeTile)
 	{
-		
+        //Debug.Log("SCOOPING PUPS");
 		for (int i = 0; i < myRoom.abstractRoom.creatures.Count; i++)
 		{
-			Player checkPlayer = null;
-			Creature checkCreature = myRoom.abstractRoom.creatures[i].realizedCreature;
-			if (checkCreature != null && checkCreature is Player)
-				checkPlayer = (checkCreature as Player);
-
-			if (checkPlayer.isNPC
+			if (myRoom.abstractRoom.creatures[i].realizedCreature is Player checkPlayer
+                && checkPlayer.isNPC
 				&& ValidPlayerForRoom(checkPlayer, myRoom)
 				&& checkPlayer.inShortcut == false
 				&& checkPlayer.AI != null
 				&& checkPlayer.AI.abstractAI.isTamed
 			)
 			{
-				checkPlayer.enteringShortCut = shortCutBeacon;
+                checkPlayer.enteringShortCut = pipeTile; // shortCutBeacon;
 			}
 		}
 	}
@@ -520,7 +505,7 @@ public partial class CoopLeash : BaseUnityPlugin
     public static bool ValidPlayer(Player player)
     {
         //MUST EXIST, NOT BE DEAD, AND NOT BE CAPTURED BY A CREATURE
-        return (player != null && !player.dead && player.dangerGraspTime < 30);
+        return (player != null && !(player.dead || player.playerState.permaDead) && player.dangerGraspTime < 1);
     }
 
     public static bool ValidPlayerForRoom(Player player, Room room) {
@@ -653,33 +638,40 @@ public partial class CoopLeash : BaseUnityPlugin
         if (self.GetCat().skipCamTrigger > 0)
             self.GetCat().skipCamTrigger--;
 
-        if (CLOptions.warpButton.Value && self.room != null && self.room == beaconRoom && ValidPlayer(self)) {
+        if (self.room != null && ValidPlayer(self)) {
             
-			//CHECK FOR DISTANCE REQUIREMENTS TO TELEPORT! //CHECK IF ENOUGH SLUGS ARE IN THE TUBE TO ALLOW TELEPORT
-			bool distReq = !CLOptions.proximityReq.Value || Custom.DistLess(self.bodyChunks[0].pos, self.room.MiddleOfTile(shortCutBeacon), CLOptions.proxDist.Value * 20);
-			bool bodyReq = !CLOptions.bodyCountReq.Value || TubedSlugs(self.room) >= UnTubedSlugsInRoom(self.room);
-			
-			//TAP MAP TO TELEPORT!
-			if (distReq && bodyReq && self.onBack == null && !(rotundWorldEnabled && self.room.abstractRoom.shelter)) {
-				//TELEPORT TO THE BEACON PIPE!
-				if (self.input[0].mp && self.shortcutDelay <= 0) {
-					self.enteringShortCut = shortCutBeacon;
-                    self.GetCat().skipCamTrigger = 10;
-                    //Debug.Log("TELEPORT TO PIPE");
+            if (CLOptions.warpButton.Value && self.room == beaconRoom)
+            {
+                //CHECK FOR DISTANCE REQUIREMENTS TO TELEPORT! //CHECK IF ENOUGH SLUGS ARE IN THE TUBE TO ALLOW TELEPORT
+                bool distReq = !CLOptions.proximityReq.Value || Custom.DistLess(self.bodyChunks[0].pos, self.room.MiddleOfTile(shortCutBeacon), CLOptions.proxDist.Value * 20);
+                bool bodyReq = !CLOptions.bodyCountReq.Value || TubedSlugs(self.room) >= UnTubedSlugsInRoom(self.room);
+
+                //TAP MAP TO TELEPORT!
+                if (distReq && bodyReq && self.onBack == null && !(rotundWorldEnabled && self.room.abstractRoom.shelter))
+                {
+                    //TELEPORT TO THE BEACON PIPE!
+                    if (self.input[0].mp && self.shortcutDelay <= 0)
+                    {
+                        self.enteringShortCut = shortCutBeacon;
+                        self.GetCat().skipCamTrigger = 10;
+                        //Debug.Log("TELEPORT TO PIPE");
+                    }
                 }
-			}
+            }
+			
 
 
             //TELEPORT TOWARDS THE DIRECITON OF THE SHORTCUT
-            if (self.room != null && self.enteringShortCut != null && self.enteringShortCut == shortCutBeacon)
+            if (self.room != null && self.enteringShortCut != null && (self.enteringShortCut == shortCutBeacon || self.isNPC))
             { //MAKE SURE IT'S THE CORRECT SHORTCUT
-                Vector2 pos = (shortCutBeacon + self.room.ShorcutEntranceHoleDirection(shortCutBeacon)).ToVector2() * 20f;
+                IntVector2 tpPos = (IntVector2)self.enteringShortCut; //shortCutBeacon
+                Vector2 pos = (tpPos + self.room.ShorcutEntranceHoleDirection(tpPos)).ToVector2() * 20f;
 
                 float xStretch = 1f;
                 float yStretch = 1f;
                 if (rotundWorldEnabled)
                 {
-                    if (self.room.ShorcutEntranceHoleDirection(shortCutBeacon).x != 0)
+                    if (self.room.ShorcutEntranceHoleDirection(tpPos).x != 0)
                         yStretch = 4f;
                     else
                         xStretch = 4f;
@@ -896,8 +888,12 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
 			}
 			else if (player.room == beaconRoom)// && shortCutBeacon == shortCut.StartTile) { /WAIT NO, WE WANT THE OTHERS IN THE BEACON PIPE TO NOT BE TRAPPED IF THE LAST DUMMY TAKES THE WRONG ONE
-            { 
+            {
                 //WE WERE THE ONLY ONE LEFT IN THE BEACON ROOM! REMOVE EXISTING BEACON
+
+                //DON'T LEAVE THE KIDS BEHIND
+                if (CLOptions.bringPups.Value)
+                    ScoopPups(beaconRoom, shortCut.StartTile);
 
                 orig(self, creature, room, shortCut); //WAIT, WE HAVE TO RUN OURS FIRST I THINK.
 				
@@ -917,22 +913,25 @@ public partial class CoopLeash : BaseUnityPlugin
                         waitDelay += 2;
                     }
                 }
-				
-				//DON'T LEAVE THE KIDS BEHIND
-				if (CLOptions.bringPups.Value)
-					ScoopPups(beaconRoom);
 
                 WipeBeacon("ShortcutHandler_SuckInCreature"); //OKAY NOW REMOVE IT
                 spotlightMode = false; //TURN THIS OFF IF IT WAS ON
                 return; //WE ALREADY RAN ORIG SO DON'T DO IT AGAIN
             }
+
+            else if (CLOptions.bringPups.Value)
+            {
+                //Debug.Log("TRY SCOOP 2");
+                ScoopPups(room, shortCut.StartTile);
+            }
         }
 		
 		
 		//IF WE ARE TRAVELING WITH PUPS, BRING THEM WITH US
-		else if (CLOptions.bringPups.Value && creature is Player player2 && !player2.isNPC && (!ModManager.CoopAvailable || Custom.rainWorld.options.JollyPlayerCount <= 1) && validShortType)
-		{
-			ScoopPups(beaconRoom);
+		else if (CLOptions.bringPups.Value && creature is Player player2 && !player2.isNPC && validShortType) //(!ModManager.CoopAvailable || Custom.rainWorld.options.JollyPlayerCount <= 1) &&
+        {
+            //Debug.Log("TRY SCOOP");
+            ScoopPups(room, shortCut.StartTile);
 		}
 
         //IF IT'S A NORMAL SHORTCUT, GIVE US A WAIT TIME ANYWAYS
