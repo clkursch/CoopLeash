@@ -105,6 +105,8 @@ public partial class CoopLeash : BaseUnityPlugin
         orig(self);
         try
         {
+            MachineConnector.SetRegisteredOI("WillowWisp.CoopLeash", Options);
+
             if (IsInit) return;
 
             for (int i = 0; i < ModManager.ActiveMods.Count; i++)
@@ -117,14 +119,13 @@ public partial class CoopLeash : BaseUnityPlugin
                 {
                     camScrollEnabled = true;
                 }
-                if (ModManager.ActiveMods[i].id == "drwoof.swallowanythingmod")
+                if (ModManager.ActiveMods[i].id == "swalloweverything")
                     swallowAnythingEnabled = true;
             }
 
             //Your hooks go here
             On.RainWorldGame.ShutDownProcess += RainWorldGameOnShutDownProcess;
             On.GameSession.ctor += GameSessionOnctor;
-            MachineConnector.SetRegisteredOI("WillowWisp.CoopLeash", Options);
 
             On.RainWorldGame.Update += RainWorldGame_Update;
             On.ProcessManager.PostSwitchMainProcess += ProcessManager_PostSwitchMainProcess;
@@ -144,8 +145,6 @@ public partial class CoopLeash : BaseUnityPlugin
             On.RoomCamera.Update += RoomCamera_Update;
             On.ShortcutHandler.Update += ShortcutHandler_Update;
 
-            //On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Update += JollyPlayerArrow_Update;
-            //On.JollyCoop.JollyHUD.JollyMeter.Update += JollyMeter_Update;
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
 
             IsInit = true;
@@ -170,12 +169,15 @@ public partial class CoopLeash : BaseUnityPlugin
 		{
 			if (myRoom.abstractRoom.creatures[i].realizedCreature is Player checkPlayer
                 && checkPlayer.isNPC
-				&& ValidPlayerForRoom(checkPlayer, myRoom)
-				&& checkPlayer.inShortcut == false
+				&& (ValidPlayerForRoom(checkPlayer, myRoom) || checkPlayer.inShortcut)
+				//&& checkPlayer.inShortcut == false
+                && !(checkPlayer.dead || checkPlayer.dangerGraspTime > 0) //CHECK THESE NOW SINCE BEING IN A SHORTCUT NEGATES THE VALIDATION CHECK
 				&& checkPlayer.AI != null
 				&& checkPlayer.AI.abstractAI.isTamed
 			)
 			{
+                if (checkPlayer.inShortcut) //SPIT PUPS OUT OF SHORTCUTS SO THEY COME WITH US
+                    checkPlayer.SpitOutOfShortCut(pipeTile, myRoom, true);
                 checkPlayer.enteringShortCut = pipeTile; // shortCutBeacon;
 			}
 		}
@@ -260,8 +262,6 @@ public partial class CoopLeash : BaseUnityPlugin
     {
         beaconRoom = null;
         shortCutBeacon = new IntVector2(0, 0);
-        //extendoPipe = false;
-        //Debug.Log("WIPING BEACON! " + debugOutput);
     }
 
     private void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, RainWorldGame self)
@@ -293,8 +293,6 @@ public partial class CoopLeash : BaseUnityPlugin
 
         if (camScrollEnabled && CLOptions.smartCam.Value && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player)
         {
-            //Debug.Log("RUNNING THE THING" + self.frameCount);
-            //this.pos.y = this.followAbstractCreature.realizedCreature.mainBodyChunk.pos.y - 384f;
             origFollorCrit = self.followAbstractCreature;
             origBodyPos = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
 			origBodyPos2 = self.followAbstractCreature.realizedCreature.bodyChunks[1].pos;
@@ -334,7 +332,7 @@ public partial class CoopLeash : BaseUnityPlugin
                         }  
 					}
 							
-					if (!plr.GetCat().defector)
+					if (!plr.GetCat().defector && plr.GetCat().pipeType != "other") //SKIP THIS CHECK IF WE ARE TRANSITIONING BETWEEN ROOMS. OUR UPDATES ARE STILL FROM THE PREVIOUS ROOM
 					{
 						Vector2 plrPos = plr.mainBodyChunk.pos;
 						if (plrPos.x < maxLeft)
@@ -350,13 +348,13 @@ public partial class CoopLeash : BaseUnityPlugin
 						totalX += plrPos.x;
 						totalY += plrPos.y;
 						totalCnt++;
-                        if (!plr.inShortcut)
-                        {
-                            unPiped++; //KEEP TRACK OF THIS. WE NEED TO KNOW IF IT'S 0
-                            
-                        }
 					}
-				}
+
+                    if (plr.GetCat().pipeType != "normal") //!plr.inShortcut
+                    {
+                        unPiped++; //KEEP TRACK OF THIS. WE NEED TO KNOW IF IT'S 0
+                    }
+                }
 			}
 
             //FIND THE HIGHEST PLAYER ON SCREEN
@@ -388,12 +386,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
                 //Debug.Log("RUNNING THE THING" + maxLeft + " - " + maxRight + " - " + maxUp + " - " + maxDown + " - ");
 
-                
-                //if (unPiped != 0 && !spotlightMode)
-                //{
-
                 //CHECK FOR DEFECTORS, PLAYERS WHO HAVE STRAYED TOO FAR FROM THE GROUP AVERAGE IN EITHER THE X OR Y AXIS
-                //Vector2 avgPoint = new Vector2( totalX/totalCnt , totalY/totalCnt );
                 float avgX = totalX / totalCnt;
                 float avgY = totalY / totalCnt;
                 Player mostBehindPlayer = null;
@@ -464,13 +457,9 @@ public partial class CoopLeash : BaseUnityPlugin
                 {
                     //OKAY NEW PLAN. TAKE THE DISTANCE WE ARE SUPPOSED TO TRAVEL, AND DOUBLE IT
                     Vector2 slingShot = adjPosition - self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
-                    //self.followAbstractCreature.realizedCreature.mainBodyChunk.pos += slingShot * 2f;
                     self.followAbstractCreature.realizedCreature.mainBodyChunk.pos += new Vector2(slingShot.x * 2f, slingShot.y * (turple)); //WAIT IM SO CONFUSED... DOES ONLY THE X NEED TO BE DOUBLED???
-                    //Debug.Log("FINAL POS " + adjPosition);
                     shiftBody = true;
                 }
-                
-                //}
 			}
         }
 
@@ -487,7 +476,7 @@ public partial class CoopLeash : BaseUnityPlugin
         }
 
         //THANKS TO ALL THAT DUMB JANK FROM SBCAMERASCROLL, WE HAVE TO SWAP OUT OUR FOCUS CREATURE IF IT'S HIGHER THAN ANOTHER PLAYER ON SCREEN. YOU NITWIT
-        if (swapFollower != null) //(requestSwap) // && (self.followAbstractCreature.realizedCreature as Player).timeSinceSpawned > 40)
+        if (swapFollower != null && !spotlightMode) //(requestSwap) // && (self.followAbstractCreature.realizedCreature as Player).timeSinceSpawned > 40)
             self.followAbstractCreature = swapFollower; //IT'S SAFE TO JUST CHANGE THIS WITHOUT CALLING ChangeCameraToPlayer() AS LONG AS THEY ARE IN THE SAME ROOM
         //ABSOLUTELY STUPIT
 
@@ -737,10 +726,6 @@ public partial class CoopLeash : BaseUnityPlugin
                         self.transportVessels[num].wait = 1;
                     else
                         self.transportVessels[num].wait = 0; //THIS ISN'T THE BEACON, JUST GO RIGHT THROUGH!
-
-                    //Debug.Log("OTHERS IN ROOM " + othersInRoom);
-                    //if (player.playerState.playerNumber == 0 && player.room != null)
-                    //    Debug.Log("ENTERING SC " + player.room?.roomSettings.name + " BEAC " + beaconRoom?.roomSettings.name);  // player.enteringShortCut IT'S NULL
                 }
             }
         }
@@ -770,10 +755,7 @@ public partial class CoopLeash : BaseUnityPlugin
         {
             player.GetCat().lastRoom = player.room.roomSettings.name; //WILL THIS BE NON-NULL?
 			if (self.room?.shortcutData(entrancePos).shortCutType == ShortcutData.Type.Normal)
-            {
                 player.GetCat().pipeType = "normal";
-                //extendoPipe = true;
-            }
             else
                 player.GetCat().pipeType = "other";
 
@@ -822,11 +804,6 @@ public partial class CoopLeash : BaseUnityPlugin
         bool validShortType = shortCut.shortCutType == ShortcutData.Type.RoomExit; // || shortCut.shortCutType == ShortcutData.Type.Normal;
         if (CLOptions.waitForAll.Value && creature is Player player && !player.isNPC && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount > 1 && validShortType) {
 
-
-            //HOLD IT! HAVE SOME STANDARDS AT LEAST...
-            // shortCutBeacon = shortCut.StartTile;
-            // beaconRoom = room;
-
 			//ENTERING THE PIPE WILL BREAK CAMERA PANNING BECAUSE WE CAN NO LONGER STRETCH OUR TORSO. HAND CAMERA CONTROL TO SOMEONE ELSE! SOMEONE NOT IN A PIPE
             if (creature.abstractCreature == room.game.cameras[0].followAbstractCreature)
 			{
@@ -865,21 +842,14 @@ public partial class CoopLeash : BaseUnityPlugin
 					}
                     //Debug.Log("PIPE TIME " + sluggo.playerState.playerNumber + " : " + sluggo.GetCat().lastRoom + " : " + (beaconRoom == null || sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name) + " - " + (slug.inShortcut || slug == creature));
                     //NOW!... IS WE IN THE PIPE OR NOT
-                    if ((slug.inShortcut || slug == creature) && (beaconRoom == null || sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name)) //WE CHECK FOR == CREATURE BECAUSE THEY ARE THE ONES ENTERING THE PIPE (but arent inShortcut yet)
+                    if ((slug.GetCat().pipeType == "other" || slug == creature) && (beaconRoom == null || sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name)) //WE CHECK FOR == CREATURE BECAUSE THEY ARE THE ONES ENTERING THE PIPE (but arent inShortcut yet)
 						slugsInPipe++;
 					else
 						othersInRoom++;
-					
-					// }
                 }
             }
                         
-					
-			
-			
 			// float req = 0.5f; //SET THE PERCENTAGE OF SLUGS THAT NEED TO BE INSIDE BEFORE YOU CAN TELEPORT
-			
-			
 			if (othersInRoom > 0 && ValidPlayer(creature as Player))
 			{
                 if (shortCutBeacon == new IntVector2(0, 0)) {
@@ -890,7 +860,6 @@ public partial class CoopLeash : BaseUnityPlugin
 			else if (player.room == beaconRoom)// && shortCutBeacon == shortCut.StartTile) { /WAIT NO, WE WANT THE OTHERS IN THE BEACON PIPE TO NOT BE TRAPPED IF THE LAST DUMMY TAKES THE WRONG ONE
             {
                 //WE WERE THE ONLY ONE LEFT IN THE BEACON ROOM! REMOVE EXISTING BEACON
-
                 //DON'T LEAVE THE KIDS BEHIND
                 if (CLOptions.bringPups.Value)
                     ScoopPups(beaconRoom, shortCut.StartTile);
@@ -939,11 +908,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
         //    self.entranceNode.
         //}
-
-
         orig(self, creature, room, shortCut);
-
-        
     }
 
 
