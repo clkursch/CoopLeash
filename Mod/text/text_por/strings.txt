@@ -1,0 +1,29 @@
+Pipe Warp Beacons|Teleporte Para Canos
+Press Map to teleport to players in pipes|Pressione MAPA para teleportar para jogadores em canos
+Wait for Everyone|Aguardar Por Todos os Jogadores
+Players must wait for everyone before leaving a room|Jogadores devem aguardar por todos antes de sair da sala
+Player count requirement|Requirir ao menos metade
+Pipes cannot be teleported to until at least half of the players are inside|Não será permitido teleportar para canos até que pelo menos metade dos jogadores estejam dentro
+Proximity requirement|Requerimento de distância
+Teleporting to a pipe requires players to be within a certain number of tiles|Teleportar para um cano requer que o jogador esteja dentro de uma certa distância
+Tiles|Distância
+Quick Piggyback|Subir Nas Costas Rapidamente
+Jump and grab a standing player to piggyback onto them|Pule e agarre um jogador em pé para subir nas costas dele
+Requires SBCameraScroll mod|Requer o mod SBCameraScroll
+Smart Camera|Câmera Inteligente
+The camera will pan towards the center of the group|A câmera será posicionada no centro do grupo
+Entering a pipe will create a warp beacon for other players|Entrar em um cano irá marca-lo para teleporte pelos outros jogadores
+Tapping the MAP button will teleport you into the pipe with the beacon|Pressionar MAPA irá teleportar o jogador para o cano marcado
+Tapping the MAP button again will exit the pipe|Pressione MAPA novamente para sair do cano
+Players cannot go through the beacon pipe until all players in the room enter the pipe|Não é possível ir para outra sala através de um cano marcado até que todos os jogadores entrem
+If the SBCameraScroll mod is enabled, the camera will pan evenly between all players|Se o mod SBCameraScroll estiver ativado, a câmera irá se posicionar no centro do grupo de jogadores
+Tap the MAP button to toggle between group focus and solo focus|Pessione MAPA para trocar entre foco no grupo e foco no jogador
+Getting too far off-screen will remove you from group focus until you get close enough to re-group|A câmera com foco no grupo irá desconsiderar jogadores que estejam muito distatnes do grupo
+(Only one beacon can exist at a time)|(Não é possível marcar mais de um cano ao mesmo tempo)
+(Entering a non-beacon pipe while a beacon exists will send you through as normal)|(Entrar em um cano enquanto outro está marcado irá mover o jogador para a outra sala normalmente)
+Pup Leash|Trazer Lesgatinhos
+Tamed slugpups will teleport to you as you enter pipes|Lesgatinhos amigáveis serão teleportados ao atravessar um cano
+Pet Leash|Trazer Lagartos
+Tamed lizards will teleport to you as you enter pipes|Lagartos amigáveis serão teleportados ao atravessar um cano
+--- How It Works: ---|--- Como Funciona: ---
+Stick Together Options|Opções de Stick Together
