@@ -67,8 +67,8 @@ If SBCameraScroll is enabled, the camera will focus on the center of the group
 //IF WE'RE FOLLOWING A DEFECTOR, IT'S ALWAYS A SPOTLIGHT
 //Make sure you can't hop on stuck players
 
-//New ScoopPups()
-//Workaround for swallow anything
+//Hold jump to force departure
+//Scoop tamed lizards too
 */
 
 public partial class CoopLeash : BaseUnityPlugin
@@ -146,6 +146,7 @@ public partial class CoopLeash : BaseUnityPlugin
             On.ShortcutHandler.Update += ShortcutHandler_Update;
 
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
+            On.JollyCoop.JollyHUD.JollyMeter.Update += JollyMeter_Update;
 
             IsInit = true;
         }
@@ -179,6 +180,20 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (checkPlayer.inShortcut) //SPIT PUPS OUT OF SHORTCUTS SO THEY COME WITH US
                     checkPlayer.SpitOutOfShortCut(pipeTile, myRoom, true);
                 checkPlayer.enteringShortCut = pipeTile; // shortCutBeacon;
+			}
+			
+			//AND THEN DO LIZARDS TOO
+			if (myRoom.abstractRoom.creatures[i].realizedCreature != null 
+				&& myRoom.abstractRoom.creatures[i].realizedCreature is Lizard checkLizard
+				&& checkLizard.room != null 
+				&& checkLizard.room == myRoom
+                && !checkLizard.dead
+				&& checkLizard.AI.friendTracker.friend != null
+			)
+			{
+                if (checkLizard.inShortcut) //SPIT PUPS OUT OF SHORTCUTS SO THEY COME WITH US
+                    checkLizard.SpitOutOfShortCut(pipeTile, myRoom, true);
+                checkLizard.enteringShortCut = pipeTile;
 			}
 		}
 	}
@@ -224,7 +239,7 @@ public partial class CoopLeash : BaseUnityPlugin
 		//IF WE ARE A DEFECTOR CALLING THE CAMERA FROM SOMEONE ELSE, SPOTLIGHT US RIGHT AWAY.
 		if (self.GetCat().defector)
 		{
-			if (self.room.game.cameras[0].followAbstractCreature != null && self.room.game.cameras[0].followAbstractCreature.realizedCreature == self)
+			if (self.room == null || (self.room.game.cameras[0].followAbstractCreature != null && self.room.game.cameras[0].followAbstractCreature.realizedCreature == self))
 			{
 				cycleSwitch = true;
 				spotlightMode = false;
@@ -246,7 +261,8 @@ public partial class CoopLeash : BaseUnityPlugin
     private void Player_ctor(On.Player.orig_ctor orig, Player self, AbstractCreature abstractCreature, World world)
     {
         orig(self, abstractCreature, world);
-        self.GetCat().lastRoom = self.room.roomSettings.name;
+		if (self.room != null)
+			self.GetCat().lastRoom = self.room.roomSettings.name;
     }
 
     private void ProcessManager_PostSwitchMainProcess(On.ProcessManager.orig_PostSwitchMainProcess orig, ProcessManager self, ProcessManager.ProcessID ID)
@@ -291,7 +307,7 @@ public partial class CoopLeash : BaseUnityPlugin
         bool requestSwap = false;
         AbstractCreature swapFollower = null;
 
-        if (camScrollEnabled && CLOptions.smartCam.Value && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player)
+        if (camScrollEnabled && CLOptions.smartCam.Value && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null)
         {
             origFollorCrit = self.followAbstractCreature;
             origBodyPos = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
@@ -572,7 +588,7 @@ public partial class CoopLeash : BaseUnityPlugin
         if (CLOptions.quickPiggy.Value && self.input[0].pckp && !self.input[1].pckp && self.onBack == null && self.room != null && !self.isNPC && !self.pyroJumpped && !self.submerged && self.standing && self.lowerBodyFramesOffGround > 0)
         {
             //Debug.Log("ON WHO??" + self.onBack);
-            float range = 15 + self.bodyChunks[1].rad;
+            float range = 20 + self.bodyChunks[1].rad;
             for (int i = 0; i < self.room.game.Players.Count; i++)
             {
                 if (self.room.game.Players[i].realizedCreature != null
@@ -626,7 +642,10 @@ public partial class CoopLeash : BaseUnityPlugin
 
         if (self.GetCat().skipCamTrigger > 0)
             self.GetCat().skipCamTrigger--;
-
+		
+		if (self.GetCat().forceDepart > 0)
+            self.GetCat().forceDepart--;
+		
         if (self.room != null && ValidPlayer(self)) {
             
             if (CLOptions.warpButton.Value && self.room == beaconRoom)
@@ -682,10 +701,10 @@ public partial class CoopLeash : BaseUnityPlugin
         for (int num = self.transportVessels.Count - 1; num >= 0; num--) 
         {
             if (ModManager.CoopAvailable && self.transportVessels[num]?.creature is Player player && !player.isNPC && self.transportVessels[num].room == beaconRoom?.abstractRoom) {
-
+				bool forceDepart = false;
                 //IF WE PRESS THE MAP BUTTON, DUMP US OUT WHERE WE STAND! I THINK
                 Room realizedRoom = self.transportVessels[num].room.realizedRoom; //DO WE REALLY NEED TO CHECK IF IT'S AN ENTRANCE?
-                if (realizedRoom.GetTile(self.transportVessels[num].pos).Terrain == Room.Tile.TerrainType.ShortcutEntrance)
+                if (realizedRoom != null && realizedRoom.GetTile(self.transportVessels[num].pos).Terrain == Room.Tile.TerrainType.ShortcutEntrance)
 				{
                     Player myPlayer = self.transportVessels[num].creature as Player;
                     if (myPlayer != null && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 11, Custom.rainWorld))
@@ -701,6 +720,17 @@ public partial class CoopLeash : BaseUnityPlugin
                         }
 
                         return; //CAN WE DO THIS? DOES THIS WORK? THIS SEEMS LIKE A TERRIBLE IDEA
+                    }
+					
+					//IF WE'RE HOLDING DOWN THE JUMP BUTTON, LET US GO THROUGH PIPES ANYWAYS
+					if (myPlayer != null && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 0, Custom.rainWorld))
+                    {
+                        myPlayer.GetCat().forceDepart++;
+						if (myPlayer.GetCat().forceDepart > 30)
+						{
+							self.transportVessels[num].wait = 0;
+							forceDepart = true;
+						}
                     }
 				}
 
@@ -720,7 +750,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
 
                 //AS LONG AS THERE IS A PLAYER LEFT IN THE ROOM, DON'T DEPART
-                if (CLOptions.waitForAll.Value && othersInRoom > 0 ) {
+                if (CLOptions.waitForAll.Value && othersInRoom > 0 && !forceDepart) {
                     
                     if (shortCutBeacon != new IntVector2(0,0) && room.MiddleOfTile(self.transportVessels[num].pos) == room.MiddleOfTile(shortCutBeacon))
                         self.transportVessels[num].wait = 1;
@@ -959,6 +989,7 @@ public static class PipeStatusClass
 		public bool defector;
         public bool forcedDefect;
         public int skipCamTrigger;
+		public int forceDepart;
 
         public PipeStatus()
         {
@@ -967,6 +998,7 @@ public static class PipeStatusClass
             this.lastRoom = "";
 			this.defector = false;
             this.forcedDefect = false;
+			this.forceDepart = 0;
         }
     }
 
