@@ -146,7 +146,7 @@ public partial class CoopLeash : BaseUnityPlugin
             On.ShortcutHandler.Update += ShortcutHandler_Update;
 
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
-            On.JollyCoop.JollyHUD.JollyMeter.Update += JollyMeter_Update;
+            On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Draw += JollyPlayerArrow_Draw;
 
             IsInit = true;
         }
@@ -156,9 +156,9 @@ public partial class CoopLeash : BaseUnityPlugin
             throw;
         }
     }
-	
-	//SWOLLOW ANYTHING IS WEIRD SO. DO THIS INSTEAD
-	public static bool SlugBackCheck(Player self)
+
+    //SWOLLOW ANYTHING IS WEIRD SO. DO THIS INSTEAD
+    public static bool SlugBackCheck(Player self)
 	{
 		return (ModManager.MSC || ModManager.CoopAvailable) && self.slugOnBack != null && !self.slugOnBack.interactionLocked && self.slugOnBack.slugcat == null && (self.spearOnBack == null || !self.spearOnBack.HasASpear);
 	}
@@ -191,7 +191,7 @@ public partial class CoopLeash : BaseUnityPlugin
 				&& checkLizard.AI.friendTracker.friend != null
 			)
 			{
-                if (checkLizard.inShortcut) //SPIT PUPS OUT OF SHORTCUTS SO THEY COME WITH US
+                if (checkLizard.inShortcut)
                     checkLizard.SpitOutOfShortCut(pipeTile, myRoom, true);
                 checkLizard.enteringShortCut = pipeTile;
 			}
@@ -202,22 +202,32 @@ public partial class CoopLeash : BaseUnityPlugin
     private void JollyMeter_Draw(On.JollyCoop.JollyHUD.JollyMeter.orig_Draw orig, JollyCoop.JollyHUD.JollyMeter self, float timeStacker)
     {
         orig(self, timeStacker);
-        
+        if (!CLOptions.smartCam.Value)
+            return;
+
         if (!spotlightMode)
         {
             self.cameraArrowSprite.alpha = 0;
         }
+        else
+        {
+            self.customFade = 5f; //ALWAYS SHOW THE HUD IN SPOTLIGHT MODE (SO WE KNOW SOMEONE HAS CAM)
+        }
     }
 
-    private void JollyMeter_Update(On.JollyCoop.JollyHUD.JollyMeter.orig_Update orig, JollyCoop.JollyHUD.JollyMeter self)
+    private void JollyPlayerArrow_Draw(On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.orig_Draw orig, JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow self, float timeStacker)
     {
-        if (spotlightMode)
-            self.fade = 0;
-
-        orig(self);
+        orig(self, timeStacker);
+        if (!CLOptions.waitForAll.Value)
+            return;
+        //HIDE STACKS OF PLAYER NAMES WAITING IN PIPES SO IT'S EASIER TO TELL WHEN SOMEONE IS NOT ALL THE WAY IN
+        if (self.jollyHud.RealizedPlayer != null && self.jollyHud.RealizedPlayer.inShortcut)
+        {
+            self.label.alpha = 0;
+        }
     }
 
-    
+
 
     private void Player_TriggerCameraSwitch(On.Player.orig_TriggerCameraSwitch orig, Player self)
     {
@@ -227,19 +237,19 @@ public partial class CoopLeash : BaseUnityPlugin
             orig(self);
             return;
         }
-        
-        //IGNORE CASES WHERE WE WERE JUST TRYING TO USE THE WARP PIPES
-        if ((self.room != null && self.room == beaconRoom && ValidPlayer(self)) || self.enteringShortCut != null || self.GetCat().skipCamTrigger > 0)
+
+        //IGNORE CASES WHERE WE WERE JUST TRYING TO USE THE WARP PIPES //(self.room != null && self.room == beaconRoom  && ValidPlayer(self)) ||
+        if ( self.enteringShortCut != null || self.GetCat().skipCamTrigger > 0)
         {
             return;
         }
 		
 		bool cycleSwitch = false;
-        
-		//IF WE ARE A DEFECTOR CALLING THE CAMERA FROM SOMEONE ELSE, SPOTLIGHT US RIGHT AWAY.
-		if (self.GetCat().defector)
-		{
-			if (self.room == null || (self.room.game.cameras[0].followAbstractCreature != null && self.room.game.cameras[0].followAbstractCreature.realizedCreature == self))
+
+        //IF WE ARE A DEFECTOR CALLING THE CAMERA FROM SOMEONE ELSE, SPOTLIGHT US RIGHT AWAY.
+        if (self.GetCat().defector || UnTubedSlugsInRoom(self.room) <= 1) //IF WE ARE THE ONLY PLAYER IN THE ROOM (BUT NOT THE ONLY ONE STILL ALIVE) ALLOW SWITCH
+        {
+			if (self.room == null || self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature == self)
 			{
 				cycleSwitch = true;
 				spotlightMode = false;
@@ -249,8 +259,8 @@ public partial class CoopLeash : BaseUnityPlugin
 		}
 		else //ELSE. WE SHOULD JUST ALWAYS JUST TOGGLE
 			spotlightMode = !spotlightMode;
-			
 
+        //Debug.Log("CAM SWITCH: " + self.playerState.playerNumber + " - " + cycleSwitch + "  NOW SPOTLIGHTED? " + spotlightMode);
         bool origCycle = Custom.rainWorld.options.cameraCycling;
 		if (!cycleSwitch)
 			Custom.rainWorld.options.cameraCycling = false; //PRETEND CYCLING DOESN'T EXIST 
@@ -537,7 +547,10 @@ public partial class CoopLeash : BaseUnityPlugin
     }
 
 
-    public int UnTubedSlugsInRoom(Room room) {
+    public int UnTubedSlugsInRoom(Room room) 
+    {
+        if (room == null)
+            return 0;
 
         int pCount = 0;
         for (int i = 0; i < room.game.Players.Count; i++) {
@@ -658,11 +671,13 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (distReq && bodyReq && self.onBack == null && !(rotundWorldEnabled && self.room.abstractRoom.shelter))
                 {
                     //TELEPORT TO THE BEACON PIPE!
-                    if (self.input[0].mp && self.shortcutDelay <= 0)
+                    if (self.input[0].mp && self.shortcutDelay <= 0 && self.enteringShortCut == null)
                     {
                         self.enteringShortCut = shortCutBeacon;
                         self.GetCat().skipCamTrigger = 10;
-                        //Debug.Log("TELEPORT TO PIPE");
+                        self.PlayHUDSound(SoundID.MENU_Mouse_Grab_Slider);
+                        if (self.tongue != null) //SAINT LET GO WITH YOUR TONGUE
+                            self.tongue.Release();
                     }
                 }
             }
@@ -712,6 +727,7 @@ public partial class CoopLeash : BaseUnityPlugin
                         self.SpitOutCreature(self.transportVessels[num]);
                         self.transportVessels.RemoveAt(num); //WILL THIS CAUSE ISSUES FOR THE LOOP?... -YES. THE ANSWER IS YES
                         myPlayer.GetCat().skipCamTrigger = 10;
+                        myPlayer.PlayHUDSound(SoundID.MENU_Error_Ping);
                         //OKAY WE GOTTA DO SOMETHING NOW THAT WE'VE NUKED THIS ENTRY
                         //OK WERE WE THE ONLY ONE IN THIS BEACON SHORTCUT? END IT.
                         if (TubedSlugs(realizedRoom) == 0)
@@ -726,11 +742,18 @@ public partial class CoopLeash : BaseUnityPlugin
 					if (myPlayer != null && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 0, Custom.rainWorld))
                     {
                         myPlayer.GetCat().forceDepart++;
-						if (myPlayer.GetCat().forceDepart > 30)
+						if (myPlayer.GetCat().forceDepart > 10)
 						{
 							self.transportVessels[num].wait = 0;
 							forceDepart = true;
-						}
+                            //WIPE THE BEACON IF WE WERE THE ONLY ONE WAITING
+                            if (TubedSlugs(realizedRoom) == 1) 
+                                WipeBeacon("ShortcutHandler_Update");
+                            //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
+                            realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
+                            myPlayer.GetCat().defector = true;
+                            spotlightMode = true;
+                        }
                     }
 				}
 
@@ -753,7 +776,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (CLOptions.waitForAll.Value && othersInRoom > 0 && !forceDepart) {
                     
                     if (shortCutBeacon != new IntVector2(0,0) && room.MiddleOfTile(self.transportVessels[num].pos) == room.MiddleOfTile(shortCutBeacon))
-                        self.transportVessels[num].wait = 1;
+                        self.transportVessels[num].wait = 2;
                     else
                         self.transportVessels[num].wait = 0; //THIS ISN'T THE BEACON, JUST GO RIGHT THROUGH!
                 }
@@ -830,24 +853,9 @@ public partial class CoopLeash : BaseUnityPlugin
     //HERES THE ORDER: SUCKINCREATURE IS CALLED ON THE MAIN CREATURE. THEN, AFTER THAT IS DONE, IT SETS Creature.inShortcut = true FOR ALL CONNECTED OBJECTS
     private void ShortcutHandler_SuckInCreature(On.ShortcutHandler.orig_SuckInCreature orig, ShortcutHandler self, Creature creature, Room room, ShortcutData shortCut) {
 
-        
+        Debug.Log("BEACON A " + creature.abstractCreature);
         bool validShortType = shortCut.shortCutType == ShortcutData.Type.RoomExit; // || shortCut.shortCutType == ShortcutData.Type.Normal;
         if (CLOptions.waitForAll.Value && creature is Player player && !player.isNPC && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount > 1 && validShortType) {
-
-			//ENTERING THE PIPE WILL BREAK CAMERA PANNING BECAUSE WE CAN NO LONGER STRETCH OUR TORSO. HAND CAMERA CONTROL TO SOMEONE ELSE! SOMEONE NOT IN A PIPE
-            if (creature.abstractCreature == room.game.cameras[0].followAbstractCreature)
-			{
-				for (int i = 0; i < room.game.Players.Count; i++)
-				{
-					if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != creature && !sluggo.inShortcut)
-					{
-						sluggo.TriggerCameraSwitch();
-						spotlightMode = false;
-						break;
-					}
-				}
-			}
-                
 
             //!!!! FOR THIS TO WORK! WE NEED TO TAKE INTO ACCOUNT ALL SLUGCATS THAT WERE ON OUR BACK AS WE ENTER THIS PIPE, SINCE THE GAME WON'T SEE THEM AS "IN A PIPE" YET
 
@@ -857,9 +865,7 @@ public partial class CoopLeash : BaseUnityPlugin
 			//HERE THIS VERSION CHECKS ALL PLAYERS, NOT JUST PLAYERS IN THE ROOOM (SINCE I BELEIVE PLAYERS IN SHORTCUTS NO LONGER COUNT AS IN THE ROOM)
 			for (int i = 0; i < room.game.Players.Count; i++)
             {
-                //Debug.Log("A REAL CHECK???? " + i);
-                // Debug.Log("---PLAYER CHECK " + i + " - " + (room.game.Players[i].realizedCreature != null) + " - " + (room.game.Players[i].realizedCreature is Player sluggo2) + " - " + ValidPlayer(room.game.Players[i].realizedCreature as Player) + " - " + ((room.game.Players[i].realizedCreature as Player) != creature) + " + " + (room.game.Players[i].realizedCreature as Player).GetCat().lastRoom);
-                if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != creature)
+                if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != creature && sluggo.room == creature.room)
 				{
 					Player slug = sluggo;
 					while (slug.onBack != null) //ARE WE ON SOMEONES BACK?
@@ -878,9 +884,25 @@ public partial class CoopLeash : BaseUnityPlugin
 						othersInRoom++;
                 }
             }
-                        
-			// float req = 0.5f; //SET THE PERCENTAGE OF SLUGS THAT NEED TO BE INSIDE BEFORE YOU CAN TELEPORT
-			if (othersInRoom > 0 && ValidPlayer(creature as Player))
+
+            
+            //ENTERING THE PIPE WILL BREAK CAMERA PANNING BECAUSE WE CAN NO LONGER STRETCH OUR TORSO. HAND CAMERA CONTROL TO SOMEONE ELSE! SOMEONE NOT IN A PIPE
+            if (creature.abstractCreature == room.game.cameras[0].followAbstractCreature && othersInRoom > 0)
+            {
+                for (int i = 0; i < room.game.Players.Count; i++)
+                {
+                    if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != creature && !sluggo.inShortcut)
+                    {
+                        sluggo.TriggerCameraSwitch();
+                        spotlightMode = false;
+                        break;
+                    }
+                }
+            }
+
+
+            // float req = 0.5f; //SET THE PERCENTAGE OF SLUGS THAT NEED TO BE INSIDE BEFORE YOU CAN TELEPORT
+            if (othersInRoom > 0 && ValidPlayer(creature as Player))
 			{
                 if (shortCutBeacon == new IntVector2(0, 0)) {
                     shortCutBeacon = shortCut.StartTile;
@@ -929,15 +951,13 @@ public partial class CoopLeash : BaseUnityPlugin
 		//IF WE ARE TRAVELING WITH PUPS, BRING THEM WITH US
 		else if (CLOptions.bringPups.Value && creature is Player player2 && !player2.isNPC && validShortType) //(!ModManager.CoopAvailable || Custom.rainWorld.options.JollyPlayerCount <= 1) &&
         {
-            //Debug.Log("TRY SCOOP");
             ScoopPups(room, shortCut.StartTile);
 		}
-
+        
         //IF IT'S A NORMAL SHORTCUT, GIVE US A WAIT TIME ANYWAYS
-        //if (creature is Player && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount > 1 && shortCut.shortCutType == ShortcutData.Type.Normal) {
-
+        //if (creature is Player && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount > 1 && shortCut.shortCutType == ShortcutData.Type.Normal)
         //    self.entranceNode.
-        //}
+
         orig(self, creature, room, shortCut);
     }
 
