@@ -175,7 +175,7 @@ public class CLOptions : OptionInterface
 
 
         int descLine = 225;
-        Tabs[0].AddItems(new OpLabel(25f, descLine + 25f, "--- How It Works: ---"));
+        Tabs[0].AddItems(new OpLabel(25f, descLine + 25f, Translate("--- How It Works: ---")));
         // Tabs[0].AddItems(new OpLabel(25f, descLine, "Press up against stuck creatures to push them. Grab them to pull"));
         // descLine -= 20;
         Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Entering a pipe will create a warp beacon for other players")));

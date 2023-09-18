@@ -11,9 +11,9 @@ using Debug = UnityEngine.Debug;
 using System.Runtime.CompilerServices;
 
 #pragma warning disable CS0618
-
 [module: UnverifiableCode]
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
+#pragma warning restore CS0618
 
 namespace CoopLeash;
 
