@@ -144,38 +144,36 @@ public class CLOptions : OptionInterface
 			new OpLabel(mpBox3.pos.x + 30, mpBox3.pos.y+3, Translate("Proximity requirement"))
 			{description = dsc}
 		});
-		
-		
-		
-		lineCount -= 45;
-		dsc = Translate("Tamed slugpups will teleport to you as you enter pipes");
-		Tabs[0].AddItems(new UIelement[]
-		{
-			mpBox7 = new OpCheckBox(CLOptions.bringPups, new Vector2(margin, lineCount))
-			{description = dsc},
-			new OpLabel(mpBox7.pos.x + 30, mpBox7.pos.y+3, Translate("Pup Leash"))
-			{description = dsc}
-		});
-		
-		
-		
-		//IF I EVER WANT TO CHANGE THIS... OpUpdown should be the way to go
-		dsc = Translate("Tiles");
-		int barLngt = 90 * 3;
-		float sldPad = 15;
-		Tabs[0].AddItems(new UIelement[]
-		{
+
+        //IF I EVER WANT TO CHANGE THIS... OpUpdown should be the way to go
+        dsc = Translate("Tiles");
+        int barLngt = 90 * 3;
+        float sldPad = 15;
+        Tabs[0].AddItems(new UIelement[]
+        {
             pDistOp = new OpSlider(CLOptions.proxDist, new Vector2(margin + 250, lineCount-5), barLngt)
-			{description = dsc},
+            {description = dsc},
             lblOp1 = new OpLabel(pDistOp.pos.x + ((barLngt * 1) / 5f), pDistOp.pos.y + 30, Translate("Tiles"), bigText: false)
-			{alignment = FLabelAlignment.Center}
+            {alignment = FLabelAlignment.Center}
 			// new OpLabel(pCountOp.pos.x - sldPad, pCountOp.pos.y +5, "4"),
 			// new OpLabel(pCountOp.pos.x + (barLngt * 1) + sldPad -5, pCountOp.pos.y +5, "8")
 		});
 
 
+        lineCount -= 45;
+		dsc = Translate("Tamed lizards and slugpups will teleport to you as you enter pipes");
+		Tabs[0].AddItems(new UIelement[]
+		{
+			mpBox7 = new OpCheckBox(CLOptions.bringPups, new Vector2(margin, lineCount))
+			{description = dsc},
+			new OpLabel(mpBox7.pos.x + 30, mpBox7.pos.y+3, Translate("Pet Leash"))
+			{description = dsc}
+		});
+		
+
+
         int descLine = 225;
-        Tabs[0].AddItems(new OpLabel(25f, descLine + 25f, "--- How It Works: ---"));
+        Tabs[0].AddItems(new OpLabel(25f, descLine + 25f, "--- " + Translate("How It Works") + ": ---"));
         // Tabs[0].AddItems(new OpLabel(25f, descLine, "Press up against stuck creatures to push them. Grab them to pull"));
         // descLine -= 20;
         Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Entering a pipe will create a warp beacon for other players")));
@@ -185,6 +183,8 @@ public class CLOptions : OptionInterface
         Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Tapping the MAP button again will exit the pipe")));
         descLine -= 20;
         Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Players cannot go through the beacon pipe until all players in the room enter the pipe")));
+        descLine -= 20;
+        Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Hold JUMP in a pipe to depart without waiting for other players")));
 
         descLine -= 35;
         Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("(Only one beacon can exist at a time)")));

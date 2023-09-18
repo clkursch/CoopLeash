@@ -28,7 +28,7 @@ Test
 --WORKSHOP DESCRIPTION--
 
 Help keep everyone on the same screen! Hold players in pipes until everyone is ready to go and teleport to other players with the Map button!
-Quickly climb onto other player's backs by jumping and grabbing a standing player.
+Quickly climb onto other player's backs by jumping and grabbing a standing player. Teleport tamed lizards and slugpups to you with the new Pet Leash feature
 
 This mod works great for large co-op groups where lag issues (or skill issues) leave some players struggling to reach the exit pipe while the camera switches back and forth between rooms.
 
@@ -37,22 +37,22 @@ This mod works great for large co-op groups where lag issues (or skill issues) l
 [*]Entering a pipe will create a warp beacon for other players
 [*]Tapping the MAP button will teleport you into the pipe with the beacon
 [*]Tapping the MAP button again will exit the pipe
-[*]Players cannot go through the beacon pipe until all players in the room enter the pipe.
+[*]Players cannot go through the beacon pipe until all players in the room enter the pipe
+[*]Holding JUMP will depart without waiting for other players
 [*](Only one beacon can exist at a time. Entering a non-beacon pipe while a beacon exists will send you through as normal)
 [/list]
 
-[b]If Camera Scroll mod is enabled, the camera will pan evenly between all players![/b]
+[h1]If SBCameraScroll mod is enabled[/h1]
 [list]
+[*]The camera will pan evenly between all players
 [*]Tap the MAP button to toggle between group-focus and solo-focus
 [*]Getting too far off-screen will remove you from group-focus until you get close enough to re-group
 [/list]
 
 Check the remix options menu to configure limits on teleportation or disabling certain features.
 [hr]
-Thansk to Nyuu for the thumbnail! and to Camiu for Chinese translations.
-
-THIS IS THE OPENING DAY LAUNCH SO THERE MAY BE BUGS! Please report any bugs you find and I should have them fixed within a day or two!
-
+Thanks to Nyuu for the thumbnail! and to Camiu for Chinese translations.
+Check out my other mods! [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2928004252] Rotund World [/url], Myriad (coming soon!)
 
 
 ----- TRANSLATABLE -----
@@ -464,7 +464,7 @@ public partial class CoopLeash : BaseUnityPlugin
                     mostBehindPlayer.GetCat().defector = true;
                     if (!spotlightMode) //DON'T APPLY THIS IN SPOTLIGHT MODE OR IT WOULD APPLY TO PLAYERS WHO TAKE SPOTLIGHT AND WALK AWAY
                         mostBehindPlayer.GetCat().forcedDefect = true;
-                    if (mostBehindPlayer.abstractCreature == self.followAbstractCreature)
+                    if (mostBehindPlayer.abstractCreature == self.followAbstractCreature && self.hud != null)
                         self.hud.jollyMeter.customFade = 10f; //SHOW THE HUD FOR A SECOND SO THEY KNOW THINGS CHANGED
                 }
                         
@@ -742,17 +742,18 @@ public partial class CoopLeash : BaseUnityPlugin
 					if (myPlayer != null && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 0, Custom.rainWorld))
                     {
                         myPlayer.GetCat().forceDepart++;
-						if (myPlayer.GetCat().forceDepart > 10)
+						if (myPlayer.GetCat().forceDepart > 12)
 						{
 							self.transportVessels[num].wait = 0;
 							forceDepart = true;
-                            //WIPE THE BEACON IF WE WERE THE ONLY ONE WAITING
-                            if (TubedSlugs(realizedRoom) == 1) 
-                                WipeBeacon("ShortcutHandler_Update");
                             //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
                             realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
                             myPlayer.GetCat().defector = true;
                             spotlightMode = true;
+                            //WIPE THE BEACON IF WE WERE THE ONLY ONE WAITING
+                            if (TubedSlugs(realizedRoom) == 1)
+                                WipeBeacon("ShortcutHandler_Update");
+                            myPlayer.PlayHUDSound(SoundID.MENU_Button_Standard_Button_Pressed);
                         }
                     }
 				}
@@ -760,25 +761,29 @@ public partial class CoopLeash : BaseUnityPlugin
                 //CHECK FOR OTHER SLUGCATS IN THE ROOM
                 Room room = beaconRoom;
 
-                //CHECK FOR SLUGCATS IN THE ROOM FOR REAL THIS TIME
-                for (int i = 0; i < room.game.Players.Count; i++)
+                if (room != null)
                 {
-                    if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != player)
+                    //CHECK FOR SLUGCATS IN THE ROOM FOR REAL THIS TIME
+                    for (int i = 0; i < room.game.Players.Count; i++)
                     {
-                        if ((!sluggo.inShortcut || sluggo.GetCat().pipeType == "normal") && (beaconRoom == null || sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name))
+                        if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != player)
                         {
-                            othersInRoom++;
+                            if ((!sluggo.inShortcut || sluggo.GetCat().pipeType == "normal") && sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name)
+                            {
+                                othersInRoom++;
+                            }
                         }
                     }
-                }
 
-                //AS LONG AS THERE IS A PLAYER LEFT IN THE ROOM, DON'T DEPART
-                if (CLOptions.waitForAll.Value && othersInRoom > 0 && !forceDepart) {
-                    
-                    if (shortCutBeacon != new IntVector2(0,0) && room.MiddleOfTile(self.transportVessels[num].pos) == room.MiddleOfTile(shortCutBeacon))
-                        self.transportVessels[num].wait = 2;
-                    else
-                        self.transportVessels[num].wait = 0; //THIS ISN'T THE BEACON, JUST GO RIGHT THROUGH!
+                    //AS LONG AS THERE IS A PLAYER LEFT IN THE ROOM, DON'T DEPART
+                    if (CLOptions.waitForAll.Value && othersInRoom > 0 && !forceDepart)
+                    {
+
+                        if (shortCutBeacon != new IntVector2(0, 0) && room.MiddleOfTile(self.transportVessels[num].pos) == room.MiddleOfTile(shortCutBeacon))
+                            self.transportVessels[num].wait = 2;
+                        else
+                            self.transportVessels[num].wait = 0; //THIS ISN'T THE BEACON, JUST GO RIGHT THROUGH!
+                    }
                 }
             }
         }
@@ -853,7 +858,7 @@ public partial class CoopLeash : BaseUnityPlugin
     //HERES THE ORDER: SUCKINCREATURE IS CALLED ON THE MAIN CREATURE. THEN, AFTER THAT IS DONE, IT SETS Creature.inShortcut = true FOR ALL CONNECTED OBJECTS
     private void ShortcutHandler_SuckInCreature(On.ShortcutHandler.orig_SuckInCreature orig, ShortcutHandler self, Creature creature, Room room, ShortcutData shortCut) {
 
-        Debug.Log("BEACON A " + creature.abstractCreature);
+        
         bool validShortType = shortCut.shortCutType == ShortcutData.Type.RoomExit; // || shortCut.shortCutType == ShortcutData.Type.Normal;
         if (CLOptions.waitForAll.Value && creature is Player player && !player.isNPC && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount > 1 && validShortType) {
 
@@ -891,7 +896,7 @@ public partial class CoopLeash : BaseUnityPlugin
             {
                 for (int i = 0; i < room.game.Players.Count; i++)
                 {
-                    if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != creature && !sluggo.inShortcut)
+                    if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != creature && !sluggo.inShortcut && sluggo.room == creature.room)
                     {
                         sluggo.TriggerCameraSwitch();
                         spotlightMode = false;
