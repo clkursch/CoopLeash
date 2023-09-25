@@ -144,6 +144,7 @@ public partial class CoopLeash : BaseUnityPlugin
             //On.Player.Destroy += Player_Destroy;
             On.RoomCamera.Update += RoomCamera_Update;
             On.ShortcutHandler.Update += ShortcutHandler_Update;
+            On.Menu.ControlMap.ctor += ControlMap_ctor;
 
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Draw += JollyPlayerArrow_Draw;
@@ -154,6 +155,26 @@ public partial class CoopLeash : BaseUnityPlugin
         {
             Logger.LogError(ex);
             throw;
+        }
+    }
+
+    private void ControlMap_ctor(On.Menu.ControlMap.orig_ctor orig, Menu.ControlMap self, Menu.Menu menu, Menu.MenuObject owner, Vector2 pos, Options.ControlSetup.Preset preset, bool showPickupInstructions)
+    {
+        orig.Invoke(self, menu, owner, pos, preset, showPickupInstructions);
+
+        if (self.pickupButtonInstructions != null)
+        {
+            self.pickupButtonInstructions.text += "\r\n" + menu.Translate("Stick Together Interactions:") + "\r\n";
+            if (CLOptions.warpButton.Value)
+                self.pickupButtonInstructions.text += "  - " + menu.Translate("Tapping the MAP button will teleport you into the pipe with the beacon") + "\r\n";
+            
+            self.pickupButtonInstructions.text += "  - " + menu.Translate("Tapping the MAP button again will exit the pipe") + "\r\n";
+
+            if (CLOptions.allowForceDepart.Value)
+                self.pickupButtonInstructions.text += "  - " + menu.Translate("Hold JUMP in a pipe to depart without waiting for other players") + "\r\n";
+
+            if (CLOptions.quickPiggy.Value)
+                self.pickupButtonInstructions.text += "  - " + menu.Translate("Jump and grab a standing player to piggyback onto them") + "\r\n"; 
         }
     }
 
@@ -171,11 +192,11 @@ public partial class CoopLeash : BaseUnityPlugin
 			if (myRoom.abstractRoom.creatures[i].realizedCreature is Player checkPlayer
                 && checkPlayer.isNPC
 				&& (ValidPlayerForRoom(checkPlayer, myRoom) || checkPlayer.inShortcut)
-				//&& checkPlayer.inShortcut == false
+                && checkPlayer.onBack == null
+                //&& checkPlayer.inShortcut == false
                 && !(checkPlayer.dead || checkPlayer.dangerGraspTime > 0) //CHECK THESE NOW SINCE BEING IN A SHORTCUT NEGATES THE VALIDATION CHECK
-				&& checkPlayer.AI != null
-				&& checkPlayer.AI.abstractAI.isTamed
-			)
+				&& checkPlayer.AI != null && checkPlayer.AI.abstractAI.isTamed
+            )
 			{
                 if (checkPlayer.inShortcut) //SPIT PUPS OUT OF SHORTCUTS SO THEY COME WITH US
                     checkPlayer.SpitOutOfShortCut(pipeTile, myRoom, true);
@@ -231,7 +252,9 @@ public partial class CoopLeash : BaseUnityPlugin
 
     private void Player_TriggerCameraSwitch(On.Player.orig_TriggerCameraSwitch orig, Player self)
     {
-        
+        if (CLOptions.allowDeadCam.Value == false && self.dead)
+            return;
+
         if (camScrollEnabled == false || CLOptions.smartCam.Value == false || self.timeSinceSpawned < 10)
         {
             orig(self);
@@ -240,9 +263,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
         //IGNORE CASES WHERE WE WERE JUST TRYING TO USE THE WARP PIPES //(self.room != null && self.room == beaconRoom  && ValidPlayer(self)) ||
         if ( self.enteringShortCut != null || self.GetCat().skipCamTrigger > 0)
-        {
             return;
-        }
 		
 		bool cycleSwitch = false;
 
@@ -317,7 +338,7 @@ public partial class CoopLeash : BaseUnityPlugin
         bool requestSwap = false;
         AbstractCreature swapFollower = null;
 
-        if (camScrollEnabled && CLOptions.smartCam.Value && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null)
+        if (camScrollEnabled && CLOptions.smartCam.Value && ModManager.CoopAvailable && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null)
         {
             origFollorCrit = self.followAbstractCreature;
             origBodyPos = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
@@ -464,7 +485,7 @@ public partial class CoopLeash : BaseUnityPlugin
                     mostBehindPlayer.GetCat().defector = true;
                     if (!spotlightMode) //DON'T APPLY THIS IN SPOTLIGHT MODE OR IT WOULD APPLY TO PLAYERS WHO TAKE SPOTLIGHT AND WALK AWAY
                         mostBehindPlayer.GetCat().forcedDefect = true;
-                    if (mostBehindPlayer.abstractCreature == self.followAbstractCreature && self.hud != null)
+                    if (mostBehindPlayer.abstractCreature == self.followAbstractCreature && self.hud?.jollyMeter != null)
                         self.hud.jollyMeter.customFade = 10f; //SHOW THE HUD FOR A SECOND SO THEY KNOW THINGS CHANGED
                 }
                         
@@ -597,6 +618,10 @@ public partial class CoopLeash : BaseUnityPlugin
     {
         orig(self, eu);
 
+        //DON'T DO THIS IN ARENA
+        if (!(self.room?.game?.session is StoryGameSession))
+            return;
+
         //SHOULD WE ATTEMPT TO CLIMB ON SOMEONES BACK?
         if (CLOptions.quickPiggy.Value && self.input[0].pckp && !self.input[1].pckp && self.onBack == null && self.room != null && !self.isNPC && !self.pyroJumpped && !self.submerged && self.standing && self.lowerBodyFramesOffGround > 0)
         {
@@ -609,11 +634,11 @@ public partial class CoopLeash : BaseUnityPlugin
                     && player != self
                     && player.room == self.room
                     && Custom.DistLess(self.bodyChunks[1].pos, player.bodyChunks[0].pos, range)
-                    && player.Consious && player.standing
+                    && player.Consious && (player.standing || player.onBack != null) //Standing OR on someones back
                 )
                 {
                     Player newSeat = GetSlugStackTop(player);
-                    if (newSeat != null)
+                    if (newSeat != null && newSeat.slugOnBack != null) //newSeat.slugOnBack SHOULD NEVER BE NULL BUT ACCORDING TO EXCEPTION LOGS IT WILL...
                     {
                         //PUT US UP THERE!
                         newSeat.bodyChunks[0].pos += Custom.DirVec(self.firstChunk.pos, newSeat.bodyChunks[0].pos) * 2f;
@@ -668,7 +693,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 bool bodyReq = !CLOptions.bodyCountReq.Value || TubedSlugs(self.room) >= UnTubedSlugsInRoom(self.room);
 
                 //TAP MAP TO TELEPORT!
-                if (distReq && bodyReq && self.onBack == null && !(rotundWorldEnabled && self.room.abstractRoom.shelter))
+                if (distReq && bodyReq && self.onBack == null) // && !(rotundWorldEnabled && self.room.abstractRoom.shelter)
                 {
                     //TELEPORT TO THE BEACON PIPE!
                     if (self.input[0].mp && self.shortcutDelay <= 0 && self.enteringShortCut == null)
@@ -695,14 +720,20 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (rotundWorldEnabled)
                 {
                     if (self.room.ShorcutEntranceHoleDirection(tpPos).x != 0)
-                        yStretch = 4f;
+                    {
+                        yStretch = self.room.abstractRoom.shelter ? 10 : 5f;
+                        xStretch = self.room.abstractRoom.shelter ? 0f : 1f;
+                    }
                     else
-                        xStretch = 4f;
+                    {
+                        xStretch = self.room.abstractRoom.shelter ? 10 : 5f;
+                        yStretch = self.room.abstractRoom.shelter ? 0f : 1f;
+                    }
                 }
 
                 for (int i = 0; i < self.bodyChunks.Length; i++)
                 {
-                    self.bodyChunks[i].pos = new Vector2(Mathf.Lerp(self.bodyChunks[0].pos.x, pos.x, 0.1f * xStretch), Mathf.Lerp(self.bodyChunks[i].pos.y, pos.y, 0.1f * yStretch));
+                    self.bodyChunks[i].pos = new Vector2(Mathf.Lerp(self.bodyChunks[0].pos.x, pos.x + 10, 0.1f * xStretch), Mathf.Lerp(self.bodyChunks[i].pos.y, pos.y + 10, 0.1f * yStretch)); //+5 TO ACCOUNT FOR INACCURACY
                 }
             }
         }
@@ -722,39 +753,44 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (realizedRoom != null && realizedRoom.GetTile(self.transportVessels[num].pos).Terrain == Room.Tile.TerrainType.ShortcutEntrance)
 				{
                     Player myPlayer = self.transportVessels[num].creature as Player;
-                    if (myPlayer != null && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 11, Custom.rainWorld))
+                    if (myPlayer != null)
                     {
-                        self.SpitOutCreature(self.transportVessels[num]);
-                        self.transportVessels.RemoveAt(num); //WILL THIS CAUSE ISSUES FOR THE LOOP?... -YES. THE ANSWER IS YES
-                        myPlayer.GetCat().skipCamTrigger = 10;
-                        myPlayer.PlayHUDSound(SoundID.MENU_Error_Ping);
-                        //OKAY WE GOTTA DO SOMETHING NOW THAT WE'VE NUKED THIS ENTRY
-                        //OK WERE WE THE ONLY ONE IN THIS BEACON SHORTCUT? END IT.
-                        if (TubedSlugs(realizedRoom) == 0)
+                        if (RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 11, Custom.rainWorld))
                         {
-                            WipeBeacon("ShortcutHandler_Update");
+                            self.SpitOutCreature(self.transportVessels[num]);
+                            self.transportVessels.RemoveAt(num); //WILL THIS CAUSE ISSUES FOR THE LOOP?... -YES. THE ANSWER IS YES
+                            myPlayer.GetCat().skipCamTrigger = 10;
+                            myPlayer.PlayHUDSound(SoundID.MENU_Error_Ping);
+                            //OKAY WE GOTTA DO SOMETHING NOW THAT WE'VE NUKED THIS ENTRY
+                            //OK WERE WE THE ONLY ONE IN THIS BEACON SHORTCUT? END IT.
+                            if (TubedSlugs(realizedRoom) == 0)
+                            {
+                                WipeBeacon("ShortcutHandler_Update");
+                            }
+
+                            return; //CAN WE DO THIS? DOES THIS WORK? THIS SEEMS LIKE A TERRIBLE IDEA
                         }
 
-                        return; //CAN WE DO THIS? DOES THIS WORK? THIS SEEMS LIKE A TERRIBLE IDEA
-                    }
-					
-					//IF WE'RE HOLDING DOWN THE JUMP BUTTON, LET US GO THROUGH PIPES ANYWAYS
-					if (myPlayer != null && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 0, Custom.rainWorld))
-                    {
-                        myPlayer.GetCat().forceDepart++;
-						if (myPlayer.GetCat().forceDepart > 12)
-						{
-							self.transportVessels[num].wait = 0;
-							forceDepart = true;
-                            //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
-                            realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
-                            myPlayer.GetCat().defector = true;
-                            spotlightMode = true;
-                            //WIPE THE BEACON IF WE WERE THE ONLY ONE WAITING
-                            if (TubedSlugs(realizedRoom) == 1)
-                                WipeBeacon("ShortcutHandler_Update");
-                            myPlayer.PlayHUDSound(SoundID.MENU_Button_Standard_Button_Pressed);
+                        //IF WE'RE HOLDING DOWN THE JUMP BUTTON, LET US GO THROUGH PIPES ANYWAYS
+                        if (CLOptions.allowForceDepart.Value && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 0, Custom.rainWorld))
+                        {
+                            myPlayer.GetCat().forceDepart++;
+                            if (myPlayer.GetCat().forceDepart > 12)
+                            {
+                                self.transportVessels[num].wait = 0;
+                                forceDepart = true;
+                                //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
+                                realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
+                                myPlayer.GetCat().defector = true;
+                                spotlightMode = true;
+                                //WIPE THE BEACON IF WE WERE THE ONLY ONE WAITING
+                                if (TubedSlugs(realizedRoom) == 1)
+                                    WipeBeacon("ShortcutHandler_Update");
+                                myPlayer.PlayHUDSound(SoundID.MENU_Button_Standard_Button_Pressed);
+                            }
                         }
+                        else if (myPlayer.GetCat().forceDepart > 0)
+                            myPlayer.GetCat().forceDepart--; //DECAY THE VALUE IF NOT HOLDING IT
                     }
 				}
 
@@ -836,6 +872,15 @@ public partial class CoopLeash : BaseUnityPlugin
                     WipeBeacon("Creature_SuckedIntoShortCut");
                 }
             }
+
+            //DOUBLE CHECK IF WE'RE EVEN ALLOWED TO ENTER THIS PIPE!
+            if (CLOptions.allowSplitUp.Value == false && beaconRoom == self.room && shortCutBeacon != entrancePos)
+            {
+                self.shortcutDelay = 20;
+                self.enteringShortCut = null;
+                (self as Player).PlayHUDSound(SoundID.MENU_Error_Ping);
+                return;//JUST CUT IT OUT! DON'T EVEN ENTER THE PIPE
+            }
         }
         orig(self, entrancePos, carriedByOther);
         //AND THEN ShortcutHandler.SuckInCreature RUNS (THE ONE UNDER US)
@@ -913,8 +958,8 @@ public partial class CoopLeash : BaseUnityPlugin
                     shortCutBeacon = shortCut.StartTile;
                     beaconRoom = room;
                 }
-			}
-			else if (player.room == beaconRoom)// && shortCutBeacon == shortCut.StartTile) { /WAIT NO, WE WANT THE OTHERS IN THE BEACON PIPE TO NOT BE TRAPPED IF THE LAST DUMMY TAKES THE WRONG ONE
+            }
+            else if (player.room == beaconRoom)// && shortCutBeacon == shortCut.StartTile) { /WAIT NO, WE WANT THE OTHERS IN THE BEACON PIPE TO NOT BE TRAPPED IF THE LAST DUMMY TAKES THE WRONG ONE
             {
                 //WE WERE THE ONLY ONE LEFT IN THE BEACON ROOM! REMOVE EXISTING BEACON
                 //DON'T LEAVE THE KIDS BEHIND

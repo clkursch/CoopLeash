@@ -15,7 +15,10 @@ public class CLOptions : OptionInterface
         PlayerSpeed = this.config.Bind<float>("PlayerSpeed", 1f, new ConfigAcceptableRange<float>(0f, 100f));
 		CLOptions.proxDist = this.config.Bind<int>("proxDist", 25, new ConfigAcceptableRange<int>(5, 200));
 		CLOptions.waitForAll = this.config.Bind<bool>("waitForAll", true);
-		CLOptions.warpButton = this.config.Bind<bool>("warpButton", true);
+        CLOptions.allowForceDepart = this.config.Bind<bool>("allowForceDepart", true);
+        CLOptions.allowDeadCam = this.config.Bind<bool>("allowDeadCam", false);
+        CLOptions.allowSplitUp = this.config.Bind<bool>("allowSplitUp", true);
+        CLOptions.warpButton = this.config.Bind<bool>("warpButton", true);
 		CLOptions.bodyCountReq = this.config.Bind<bool>("bodyCountReq", false);
 		CLOptions.proximityReq = this.config.Bind<bool>("proximityReq", false);
         CLOptions.quickPiggy = this.config.Bind<bool>("quickPiggy", true);
@@ -26,7 +29,10 @@ public class CLOptions : OptionInterface
     public readonly Configurable<float> PlayerSpeed;
 	public static Configurable<int> proxDist;
 	public static Configurable<bool> waitForAll;
-	public static Configurable<bool> warpButton;
+    public static Configurable<bool> allowForceDepart;
+    public static Configurable<bool> allowDeadCam;
+    public static Configurable<bool> allowSplitUp;
+    public static Configurable<bool> warpButton;
 	public static Configurable<bool> bodyCountReq;
 	public static Configurable<bool> proximityReq;
     public static Configurable<bool> quickPiggy;
@@ -42,6 +48,8 @@ public class CLOptions : OptionInterface
 	public OpCheckBox mpBox5;
     public OpCheckBox mpBox6;
     public OpCheckBox mpBox7;
+    public OpCheckBox mpBox8;
+    public OpCheckBox mpBox10;
     public OpLabel lblOp1;
 
 
@@ -93,11 +101,53 @@ public class CLOptions : OptionInterface
             new OpLabel(mpBox4.pos.x + 30, mpBox4.pos.y+3, Translate("Quick Piggyback"))
             {description = dsc}
         });
-		
-		
-		
-		
-		lineCount -= 60;
+
+
+        lineCount -= 50;
+        dsc = Translate("Allow players to enter a pipe if a warp beacon is already active on a different pipe in the room");
+        Tabs[0].AddItems(new UIelement[]
+        {
+            mpBox10 = new OpCheckBox(CLOptions.allowSplitUp, new Vector2(margin, lineCount))
+            {description = dsc},
+            new OpLabel(mpBox10.pos.x + 30, mpBox10.pos.y+3, Translate("Allow Splitting Up"))
+            {description = dsc}
+        });
+
+
+        dsc = Translate("Tamed lizards and slugpups will teleport to you as you enter pipes");
+        Tabs[0].AddItems(new UIelement[]
+        {
+            mpBox7 = new OpCheckBox(CLOptions.bringPups, new Vector2(margin + 300, lineCount))
+            {description = dsc},
+            new OpLabel(mpBox7.pos.x + 30, mpBox7.pos.y+3, Translate("Pet Leash"))
+            {description = dsc}
+        });
+
+
+
+        lineCount -= 50;
+        dsc = Translate("Allow players to hold JUMP to depart through pipes without waiting for other players");
+        Tabs[0].AddItems(new UIelement[]
+        {
+            mpBox8 = new OpCheckBox(CLOptions.allowForceDepart, new Vector2(margin, lineCount))
+            {description = dsc},
+            new OpLabel(mpBox8.pos.x + 30, mpBox8.pos.y+3, Translate("Allow Early Departure"))
+            {description = dsc}
+        });
+
+
+        OpCheckBox mpBox9;
+        dsc = Translate("Allow dead players to request camera focus");
+        Tabs[0].AddItems(new UIelement[]
+        {
+            mpBox9 = new OpCheckBox(CLOptions.allowDeadCam, new Vector2(margin + 300, lineCount))
+            {description = dsc},
+            new OpLabel(mpBox9.pos.x + 30, mpBox9.pos.y+3, Translate("Death Cam"))
+            {description = dsc}
+        });
+
+
+        lineCount -= 50;
 		dsc = Translate("Press Map to teleport to players in pipes");
 		Tabs[0].AddItems(new UIelement[]
 		{
@@ -160,18 +210,7 @@ public class CLOptions : OptionInterface
 		});
 
 
-        lineCount -= 45;
-		dsc = Translate("Tamed lizards and slugpups will teleport to you as you enter pipes");
-		Tabs[0].AddItems(new UIelement[]
-		{
-			mpBox7 = new OpCheckBox(CLOptions.bringPups, new Vector2(margin, lineCount))
-			{description = dsc},
-			new OpLabel(mpBox7.pos.x + 30, mpBox7.pos.y+3, Translate("Pet Leash"))
-			{description = dsc}
-		});
-		
-
-
+        
         int descLine = 225;
         Tabs[0].AddItems(new OpLabel(25f, descLine + 25f, "--- " + Translate("How It Works") + ": ---"));
         // Tabs[0].AddItems(new OpLabel(25f, descLine, "Press up against stuck creatures to push them. Grab them to pull"));
@@ -226,10 +265,16 @@ public class CLOptions : OptionInterface
             if (!waitForAll)
 			{
                 this.mpBox5.greyedOut = true;
-				pipeWarping = false;
+                this.mpBox8.greyedOut = true;
+                this.mpBox10.greyedOut = true;
+                pipeWarping = false;
             }
 			else
+            {
                 this.mpBox5.greyedOut = false;
+                this.mpBox8.greyedOut = false;
+                this.mpBox10.greyedOut = false;
+            }
 
 
             if (pipeWarping)
