@@ -141,10 +141,11 @@ public partial class CoopLeash : BaseUnityPlugin
             On.Player.JollyInputUpdate += Player_JollyInputUpdate;
             On.Player.checkInput += Player_checkInput;
             On.Player.TriggerCameraSwitch += Player_TriggerCameraSwitch;
-            //On.Player.Destroy += Player_Destroy;
+            On.Player.TerrainImpact += Player_TerrainImpact;
             On.RoomCamera.Update += RoomCamera_Update;
             On.ShortcutHandler.Update += ShortcutHandler_Update;
             On.Menu.ControlMap.ctor += ControlMap_ctor;
+            On.Lizard.Update += Lizard_Update;
 
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Draw += JollyPlayerArrow_Draw;
@@ -739,6 +740,40 @@ public partial class CoopLeash : BaseUnityPlugin
         }
     }
 
+
+    //LIZARDS NEED THE INCREASED WARP SPEED TOO
+    private void Lizard_Update(On.Lizard.orig_Update orig, Lizard self, bool eu)
+    {
+        orig(self, eu);
+
+        //TELEPORT TOWARDS THE DIRECITON OF THE SHORTCUT
+        if (CLOptions.bringPups.Value && self.enteringShortCut != null && self.room != null && !self.dead)
+        {
+            IntVector2 tpPos = (IntVector2)self.enteringShortCut;
+            Vector2 pos = (tpPos + self.room.ShorcutEntranceHoleDirection(tpPos)).ToVector2() * 20f;
+
+            for (int i = 0; i < self.bodyChunks.Length; i++)
+            {
+                self.bodyChunks[i].pos = new Vector2(Mathf.Lerp(self.bodyChunks[0].pos.x, pos.x + 10, 0.1f), Mathf.Lerp(self.bodyChunks[i].pos.y, pos.y + 10, 0.1f)); //+5 TO ACCOUNT FOR INACCURACY
+            }
+        }
+    }
+
+
+    //CHECK TO MAKE SURE WE AREN'T ENTERING A PIPE FROM THE WRONG END SOMEHOW??
+    private void Player_TerrainImpact(On.Player.orig_TerrainImpact orig, Player self, int chunk, IntVector2 direction, float speed, bool firstContact)
+    {
+        bool hasShortcut = (self.enteringShortCut != null);
+        //HIGH SPEED LAUNCH INTO SHORTCUT DOESN'T CHECK FOR INPUT DIRECTION! THAT'S DUMB. FIX THAT SO WE DON'T RE-ENTER PIPE EXITS THAT WERE CLOGGED WITH PLAYERS
+        orig(self, chunk, direction, speed, firstContact);
+        //IF RUNNING THIS METHOD GAVE US A SHORTCUT, DOUBLE CHECK THINGS FOR US
+        if ((self.enteringShortCut != null) && hasShortcut == false) 
+        {
+            IntVector2 intVector = self.room.ShorcutEntranceHoleDirection((IntVector2)self.enteringShortCut);
+            if (!(self.input[0].x == -intVector.x && self.input[0].y == -intVector.y))
+                self.enteringShortCut = null; //CANCL THAT SHORTCUT!
+        }
+    }
 
     private void ShortcutHandler_Update(On.ShortcutHandler.orig_Update orig, ShortcutHandler self) {
 
