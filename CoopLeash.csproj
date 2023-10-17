@@ -27,6 +27,10 @@
       <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\plugins\HOOKS-Assembly-CSharp.dll</HintPath>
 		<Private>false</Private>
     </Reference>
+    <Reference Include="ImprovedInput">
+      <HintPath>Resources\ImprovedInput.dll</HintPath>
+		<Private>false</Private>
+    </Reference>
     <Reference Include="Mono.Cecil">
       <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\Mono.Cecil.dll</HintPath>
 		<Private>false</Private>

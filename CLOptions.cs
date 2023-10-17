@@ -150,7 +150,7 @@ public class CLOptions : OptionInterface
 
 
         lineCount -= 50;
-		dsc = Translate("Press Map to teleport to players in pipes");
+		dsc = Translate("Press Map to teleport to players in pipes") + Translate("(keybind can be changed with the Improved Input Config mod)");
 		Tabs[0].AddItems(new UIelement[]
 		{
 			mpBox5 = new OpCheckBox(CLOptions.warpButton, new Vector2(margin, lineCount))

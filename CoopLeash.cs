@@ -74,7 +74,7 @@ If SBCameraScroll is enabled, the camera will focus on the center of the group
 public partial class CoopLeash : BaseUnityPlugin
 {
     private CLOptions Options;
-    
+    public static bool is_post_mod_init_initialized = false;
 
     public CoopLeash()
     {
@@ -92,12 +92,30 @@ public partial class CoopLeash : BaseUnityPlugin
     public static bool rotundWorldEnabled = false;
 	public static bool camScrollEnabled = false;
 	public static bool swallowAnythingEnabled = false;
+    public static bool improvedInputEnabled = false;
 
     private void OnEnable()
     {
         On.RainWorld.OnModsInit += RainWorldOnOnModsInit;
+        On.RainWorld.PostModsInit += RainWorld_PostModsInit;
     }
-    
+
+    private void RainWorld_PostModsInit(On.RainWorld.orig_PostModsInit orig, RainWorld self)
+    {
+        orig(self);
+        //I BARELY UNDERSTAND HOW THIS WORKS BUT SHUAMBUAM SEEMS TO HAVE IT ON LOCK SO I'LL JUST FOLLOW HIS LEAD
+        if (is_post_mod_init_initialized) return;
+        is_post_mod_init_initialized = true;
+        if (improvedInputEnabled)
+            Initialize_Custom_Input();
+    }
+    public static void Initialize_Custom_Input()
+    {
+        // wrap it in order to make it a soft dependency only;
+        Debug.Log("Stick Together: Initialize custom input.");
+        RWInputMod.Initialize_Custom_Keybindings();
+        PlayerMod.OnEnable();
+    }
 
     private bool IsInit;
     private void RainWorldOnOnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
@@ -121,6 +139,8 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
                 if (ModManager.ActiveMods[i].id == "swalloweverything")
                     swallowAnythingEnabled = true;
+                if (ModManager.ActiveMods[i].id == "improved-input-config")
+                    improvedInputEnabled = true;
             }
 
             //Your hooks go here
@@ -711,7 +731,20 @@ public partial class CoopLeash : BaseUnityPlugin
         }
     }
 
-
+    public bool IsWarpPressed(Player player, bool piped)
+    {
+        if (!improvedInputEnabled)
+        {
+            if (piped)
+                return (RWInput.CheckSpecificButton((player.State as PlayerState).playerNumber, 11, Custom.rainWorld));
+            else
+                return player.input[0].mp && !player.input[1].mp;
+        }
+        if (piped)
+            return player.WantsToWarp();
+        else
+            return player.WantsToLeavePipe();
+    }
 
     private void Player_Update(On.Player.orig_Update orig, Player self, bool eu) 
     {
@@ -747,7 +780,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (distReq && bodyReq && self.onBack == null) // && !(rotundWorldEnabled && self.room.abstractRoom.shelter)
                 {
                     //TELEPORT TO THE BEACON PIPE!
-                    if (self.input[0].mp && self.shortcutDelay <= 0 && self.enteringShortCut == null)
+                    if (IsWarpPressed(self, false) && self.shortcutDelay <= 0 && self.enteringShortCut == null)
                     {
                         self.enteringShortCut = shortCutBeacon;
                         self.GetCat().skipCamTrigger = 10;
@@ -840,7 +873,7 @@ public partial class CoopLeash : BaseUnityPlugin
                     Player myPlayer = self.transportVessels[num].creature as Player;
                     if (myPlayer != null)
                     {
-                        if (RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 11, Custom.rainWorld))
+                        if (IsWarpPressed(myPlayer, true))// if (RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 11, Custom.rainWorld))
                         {
                             self.SpitOutCreature(self.transportVessels[num]);
                             self.transportVessels.RemoveAt(num); //WILL THIS CAUSE ISSUES FOR THE LOOP?... -YES. THE ANSWER IS YES
