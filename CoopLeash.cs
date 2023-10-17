@@ -149,6 +149,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Draw += JollyPlayerArrow_Draw;
+            On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Update += JollyPlayerArrow_Update;
 
             IsInit = true;
         }
@@ -249,16 +250,47 @@ public partial class CoopLeash : BaseUnityPlugin
         }
     }
 
+    //TIMEOUT TIMER IN FRONT OF THE LABEL
+    private void JollyPlayerArrow_Update(On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.orig_Update orig, JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow self)
+    {
+        orig(self);
+        
 
+        Player myPlayer = self.jollyHud.RealizedPlayer;
+        if (myPlayer != null && myPlayer.GetCat().noCam > 0)
+        {
+            int displayTime = Mathf.CeilToInt(myPlayer.GetCat().noCam / 40f);
+            self.label.text = "(" + displayTime + ") " + self.playerName;
 
+            //if (displayTime == 0)
+            //    self.label.text = self.playerName;
+            //this.size.x = 5 * this.playerName.Length;
+        }
+        else
+            self.label.text = self.playerName;
+
+        self.size.x = self.label.text.Length;
+    }
+
+    
     private void Player_TriggerCameraSwitch(On.Player.orig_TriggerCameraSwitch orig, Player self)
     {
         if (CLOptions.allowDeadCam.Value == false && self.dead)
             return;
 
-        if (camScrollEnabled == false || CLOptions.smartCam.Value == false || self.timeSinceSpawned < 10)
+        if ((camScrollEnabled == false || CLOptions.smartCam.Value == false || self.timeSinceSpawned < 10))
         {
-            orig(self);
+            if (self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature != self && self.GetCat().noCam > 40)
+            {
+                //DO NOTHING
+            }
+            else
+            {
+                if (self.timeSinceSpawned > 10 && self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature != self)
+                    self.GetCat().noCam = Math.Max(CLOptions.camPenalty.Value, 3) * 40;
+
+                orig(self);
+            }
             return;
         }
 
@@ -267,6 +299,12 @@ public partial class CoopLeash : BaseUnityPlugin
             return;
 		
 		bool cycleSwitch = false;
+
+        //IF WE ARE NOT IN THE MAIN GROUP, ADD TIME
+        if ((self.GetCat().defector || !(CLOptions.smartCam.Value && camScrollEnabled)) && self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature != self && self.GetCat().noCam > 40)
+        {
+            return;
+        }
 
         //IF WE ARE A DEFECTOR CALLING THE CAMERA FROM SOMEONE ELSE, SPOTLIGHT US RIGHT AWAY.
         if (self.GetCat().defector || UnTubedSlugsInRoom(self.room) <= 1) //IF WE ARE THE ONLY PLAYER IN THE ROOM (BUT NOT THE ONLY ONE STILL ALIVE) ALLOW SWITCH
@@ -277,7 +315,12 @@ public partial class CoopLeash : BaseUnityPlugin
 				spotlightMode = false;
 			}
 			else
+			{
+				//IF WE'RE STEALING FROM THE MAIN GROUP, PUT A COOLDOWN ON US...
+				if (CLOptions.camPenalty.Value > 0 && !spotlightMode && self.room != null && self.room.game.AlivePlayers.Count > 2)
+					self.GetCat().noCam = Math.Max(CLOptions.camPenalty.Value, 3) * 40;
 				spotlightMode = true;
+			}
 		}
 		else //ELSE. WE SHOULD JUST ALWAYS JUST TOGGLE
 			spotlightMode = !spotlightMode;
@@ -486,8 +529,12 @@ public partial class CoopLeash : BaseUnityPlugin
                     mostBehindPlayer.GetCat().defector = true;
                     if (!spotlightMode) //DON'T APPLY THIS IN SPOTLIGHT MODE OR IT WOULD APPLY TO PLAYERS WHO TAKE SPOTLIGHT AND WALK AWAY
                         mostBehindPlayer.GetCat().forcedDefect = true;
-                    if (mostBehindPlayer.abstractCreature == self.followAbstractCreature && self.hud?.jollyMeter != null)
-                        self.hud.jollyMeter.customFade = 10f; //SHOW THE HUD FOR A SECOND SO THEY KNOW THINGS CHANGED
+                    if (mostBehindPlayer.abstractCreature == self.followAbstractCreature)
+					{
+                        if (self.hud?.jollyMeter != null)
+							self.hud.jollyMeter.customFade = 10f; //SHOW THE HUD FOR A SECOND SO THEY KNOW THINGS CHANGED
+						mostBehindPlayer.GetCat().noCam = CLOptions.camPenalty.Value * 40; //GIVE THEM A CAM DELAY
+					}
                 }
                         
 
@@ -684,6 +731,9 @@ public partial class CoopLeash : BaseUnityPlugin
 		
 		if (self.GetCat().forceDepart > 0)
             self.GetCat().forceDepart--;
+		
+		if (self.GetCat().noCam > 0)
+			self.GetCat().noCam--;
 		
         if (self.room != null && ValidPlayer(self)) {
             
@@ -1095,6 +1145,7 @@ public static class PipeStatusClass
         public bool forcedDefect;
         public int skipCamTrigger;
 		public int forceDepart;
+		public int noCam;
 
         public PipeStatus()
         {

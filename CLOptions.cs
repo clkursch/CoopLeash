@@ -14,6 +14,7 @@ public class CLOptions : OptionInterface
         Logger = loggerSource;
         PlayerSpeed = this.config.Bind<float>("PlayerSpeed", 1f, new ConfigAcceptableRange<float>(0f, 100f));
 		CLOptions.proxDist = this.config.Bind<int>("proxDist", 25, new ConfigAcceptableRange<int>(5, 200));
+		CLOptions.camPenalty = this.config.Bind<int>("camPenalty", 0, new ConfigAcceptableRange<int>(0, 10));
 		CLOptions.waitForAll = this.config.Bind<bool>("waitForAll", true);
         CLOptions.allowForceDepart = this.config.Bind<bool>("allowForceDepart", true);
         CLOptions.allowDeadCam = this.config.Bind<bool>("allowDeadCam", false);
@@ -28,6 +29,7 @@ public class CLOptions : OptionInterface
 
     public readonly Configurable<float> PlayerSpeed;
 	public static Configurable<int> proxDist;
+	public static Configurable<int> camPenalty;
 	public static Configurable<bool> waitForAll;
     public static Configurable<bool> allowForceDepart;
     public static Configurable<bool> allowDeadCam;
@@ -208,10 +210,22 @@ public class CLOptions : OptionInterface
 			// new OpLabel(pCountOp.pos.x - sldPad, pCountOp.pos.y +5, "4"),
 			// new OpLabel(pCountOp.pos.x + (barLngt * 1) + sldPad -5, pCountOp.pos.y +5, "8")
 		});
+		
+		
+		lineCount -= 45;
+		dsc = Translate("Number of seconds a player must wait to call the camera again after taking it from the main group");
+        barLngt = 50 * 3;
+		OpSlider pCamOp;
+        Tabs[0].AddItems(new UIelement[]
+        {
+            pCamOp = new OpSlider(CLOptions.camPenalty, new Vector2(margin + 200, lineCount), barLngt) {description = dsc},
+            new OpLabel(pCamOp.pos.x - 20, pCamOp.pos.y - 15, Translate("Camera Stealing Cooldown"), bigText: false)
+            {alignment = FLabelAlignment.Center}
+		});
 
 
         
-        int descLine = 225;
+        int descLine = 200;
         Tabs[0].AddItems(new OpLabel(25f, descLine + 25f, "--- " + Translate("How It Works") + ": ---"));
         // Tabs[0].AddItems(new OpLabel(25f, descLine, "Press up against stuck creatures to push them. Grab them to pull"));
         // descLine -= 20;
