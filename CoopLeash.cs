@@ -741,9 +741,9 @@ public partial class CoopLeash : BaseUnityPlugin
                 return player.input[0].mp && !player.input[1].mp;
         }
         if (piped)
-            return player.WantsToWarp();
-        else
             return player.WantsToLeavePipe();
+        else
+            return player.WantsToWarp();
     }
 
     private void Player_Update(On.Player.orig_Update orig, Player self, bool eu) 
