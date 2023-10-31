@@ -232,7 +232,8 @@ public partial class CoopLeash : BaseUnityPlugin
 				&& checkLizard.room == myRoom
                 && !checkLizard.dead
 				&& checkLizard.AI.friendTracker.friend != null
-			)
+                && checkLizard.AI.behavior != LizardAI.Behavior.ReturnPrey
+            )
 			{
                 if (checkLizard.inShortcut)
                     checkLizard.SpitOutOfShortCut(pipeTile, myRoom, true);
@@ -963,7 +964,7 @@ public partial class CoopLeash : BaseUnityPlugin
     //THIS VERSION DOES RUN FOR ALL CREATURES GETTING SUCKED IN
     public void Creature_SuckedIntoShortCut(On.Creature.orig_SuckedIntoShortCut orig, Creature self, IntVector2 entrancePos, bool carriedByOther)
     {
-        if (self is Player player && !player.isNPC)
+        if (self is Player player && !player.isNPC && player.room != null)
         {
             player.GetCat().lastRoom = player.room.roomSettings.name; //WILL THIS BE NON-NULL?
 			if (self.room?.shortcutData(entrancePos).shortCutType == ShortcutData.Type.Normal)
