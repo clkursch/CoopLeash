@@ -21,7 +21,6 @@ namespace CoopLeash;
 
 /*
 Test
--Do pole plant kills count as pipes?
 -Exclude slugpups from all checks
 
 
@@ -62,13 +61,10 @@ Climb on your friend's shoulders with jump and grab.
 If SBCameraScroll is enabled, the camera will focus on the center of the group
 
 
-//fORCE CAMERA SWITCH WHEN focus enters a pipe
-//New "Defector" check for players who get too far offscreen
-//IF WE'RE FOLLOWING A DEFECTOR, IT'S ALWAYS A SPOTLIGHT
-//Make sure you can't hop on stuck players
-
-//Hold jump to force departure
-//Scoop tamed lizards too
+Players sitting idle in shortcut entrances will be pushed into the shortcut if another player is trying to enter that shortcut 
+quick-piggyback can be done on players dangling from saint's tongue, grapple worms, or while treading surface water, regardless of if they are standing
+Added safeguards to fix an issue where a room with a player offscreen would get unloaded and the player would be unable to take camera
+Fixed an issue where disabling "allow splitting up" would make ALL shortcuts unusable while a warp beacon was active
 */
 
 public partial class CoopLeash : BaseUnityPlugin
@@ -162,6 +158,7 @@ public partial class CoopLeash : BaseUnityPlugin
             On.Player.checkInput += Player_checkInput;
             On.Player.TriggerCameraSwitch += Player_TriggerCameraSwitch;
             On.Player.TerrainImpact += Player_TerrainImpact;
+            On.Player.Collide += Player_Collide;
             On.RoomCamera.Update += RoomCamera_Update;
             On.ShortcutHandler.Update += ShortcutHandler_Update;
             On.Menu.ControlMap.ctor += ControlMap_ctor;
@@ -605,6 +602,21 @@ public partial class CoopLeash : BaseUnityPlugin
             self.room.AddObject(new ExplosionSpikes(self.room, pos.ToVector2() * 20f, 15, 15f, lifetime, 5.0f, strainMag, new Color(1f, 1f, 1f, 0.9f)));
             tickClock = tickMax;
         }
+
+        //SAFETY CHECK FOR ANY PLAYERS THAT MAY HAVE BEEN IN A SHORTCUT AS THE GAME PANIC INACTIVATES THE ROOM THEY ARE TRAVELING TO
+        if (ModManager.CoopAvailable && self.room != null)
+        {
+            for (int i = 0; i < self.room.game.Players.Count; i++)
+            {
+                //THE REALIZED PLAYER IS NULL IIN THIS CASE! BUT THEIR ABSTRACT ROOM SHOULDN'T BE...
+                AbstractCreature absPlayer = self.room.game.Players[i];
+                if (absPlayer.Room != null && absPlayer.realizedCreature == null && !absPlayer.state.dead && RWInput.CheckSpecificButton(i, 11, Custom.rainWorld))
+                {
+                    //Debug.Log("RELOAD");
+                    self.room.world.ActivateRoom(absPlayer.Room); //RE-LOAD THE ROOM! IN CASE IT WAS INACTIVE
+                }
+            }
+        }
     }
 
     public static bool ValidPlayer(Player player)
@@ -703,7 +715,8 @@ public partial class CoopLeash : BaseUnityPlugin
                     && player != self
                     && player.room == self.room
                     && Custom.DistLess(self.bodyChunks[1].pos, player.bodyChunks[0].pos, range)
-                    && player.Consious && (player.standing || player.onBack != null) //Standing OR on someones back
+                    && player.Consious 
+                    && (player.standing || player.onBack != null || (player.tongue != null && player.tongue.Attached) || player.animation == Player.AnimationIndex.SurfaceSwim || player.animation == Player.AnimationIndex.GrapplingSwing) //Standing OR on someones back
                 )
                 {
                     Player newSeat = GetSlugStackTop(player);
@@ -859,6 +872,20 @@ public partial class CoopLeash : BaseUnityPlugin
         }
     }
 
+    private void Player_Collide(On.Player.orig_Collide orig, Player self, PhysicalObject otherObject, int myChunk, int otherChunk)
+    {
+        orig(self, otherObject, myChunk, otherChunk);
+        //AUTOMATICALLY PUSH PLAYERS IDLING IN PIPE ENTRANCES INSIDE IF WE BUMP INTO THEM
+        if (CLOptions.waitForAll.Value && otherObject is Player otherPlayer && otherPlayer.shortcutDelay <= 0 && self.shortcutDelay <= 0 && otherPlayer.touchedNoInputCounter > 20 && shortCutBeacon != new IntVector2(0, 0) && self.room != null)
+        {
+            //ONLY IF WE ARE CLOSE ENOUGH AND PUSHING IN THE DIRECTION OF THE PIPE
+            IntVector2 intVector = self.room.ShorcutEntranceHoleDirection((IntVector2)shortCutBeacon);
+            if (Custom.DistLess(otherPlayer.bodyChunks[0].pos, self.room.MiddleOfTile(shortCutBeacon), 18) && (self.input[0].x == -intVector.x && self.input[0].y == -intVector.y))
+                otherPlayer.enteringShortCut = shortCutBeacon;
+        }
+    }
+
+
     private void ShortcutHandler_Update(On.ShortcutHandler.orig_Update orig, ShortcutHandler self) {
 
         int othersInRoom = 0;
@@ -967,7 +994,7 @@ public partial class CoopLeash : BaseUnityPlugin
         if (self is Player player && !player.isNPC && player.room != null)
         {
             player.GetCat().lastRoom = player.room.roomSettings.name; //WILL THIS BE NON-NULL?
-			if (self.room?.shortcutData(entrancePos).shortCutType == ShortcutData.Type.Normal)
+			if (self.room?.shortcutData(entrancePos).shortCutType == ShortcutData.Type.Normal) //AS OPPOSED TO ShortcutData.Type.RoomExit
                 player.GetCat().pipeType = "normal";
             else
                 player.GetCat().pipeType = "other";
@@ -993,7 +1020,7 @@ public partial class CoopLeash : BaseUnityPlugin
             }
 
             //DOUBLE CHECK IF WE'RE EVEN ALLOWED TO ENTER THIS PIPE!
-            if (CLOptions.allowSplitUp.Value == false && beaconRoom == self.room && shortCutBeacon != entrancePos)
+            if (CLOptions.allowSplitUp.Value == false && beaconRoom == self.room && shortCutBeacon != entrancePos && player.GetCat().pipeType != "normal")
             {
                 self.shortcutDelay = 20;
                 self.enteringShortCut = null;
