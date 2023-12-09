@@ -164,6 +164,8 @@ public partial class CoopLeash : BaseUnityPlugin
             On.Menu.ControlMap.ctor += ControlMap_ctor;
             On.Lizard.Update += Lizard_Update;
 
+            On.Player.PickupCandidate += Player_PickupCandidate;
+
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Draw += JollyPlayerArrow_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Update += JollyPlayerArrow_Update;
@@ -175,6 +177,41 @@ public partial class CoopLeash : BaseUnityPlugin
             Logger.LogError(ex);
             throw;
         }
+    }
+
+    private PhysicalObject Player_PickupCandidate(On.Player.orig_PickupCandidate orig, Player self, float favorSpears)
+    {
+        PhysicalObject result = orig.Invoke(self, favorSpears);
+        bool runExtra = false;
+        if (result != null && result.grabbedBy.Count > 0 && result.grabbedBy[0].grabber is Player player && (self.onBack != null || player.onBack != null))
+        {
+            //Debug.Log("SOMEONE IS HOLDING THIS! LOOK FOR SOMETHING ELSE... ");
+        }
+        else
+            return result;
+
+        float closest = float.MaxValue;
+        for (int i = 0; i < self.room.physicalObjects.Length; i++)
+        {
+            for (int j = 0; j < self.room.physicalObjects[i].Count; j++)
+            {
+                if (self.room.physicalObjects[i][j] is PlayerCarryableItem item && item.forbiddenToPlayer <= 0 && Custom.DistLess(self.bodyChunks[0].pos, item.bodyChunks[0].pos, item.bodyChunks[0].rad + 40f) && (Custom.DistLess(self.bodyChunks[0].pos, item.bodyChunks[0].pos, item.bodyChunks[0].rad + 20f) || self.room.VisualContact(self.bodyChunks[0].pos, item.bodyChunks[0].pos)) && self.CanIPickThisUp(item)
+                    && !(item.grabbedBy.Count > 0 && item.grabbedBy[0].grabber is Player)) //IGNORE ITEMS BEING HELD BY ANOTHER PLAYER
+                {
+                    float dist = Vector2.Distance(self.bodyChunks[0].pos, item.bodyChunks[0].pos);
+                    if (item is Spear)
+                        dist -= favorSpears;
+                    if (item.bodyChunks[0].pos.x < self.bodyChunks[0].pos.x == self.flipDirection < 0)
+                        dist -= 10f;
+                    if (dist < closest)
+                    {
+                        result = item;
+                        closest = dist;
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     private void ControlMap_ctor(On.Menu.ControlMap.orig_ctor orig, Menu.ControlMap self, Menu.Menu menu, Menu.MenuObject owner, Vector2 pos, Options.ControlSetup.Preset preset, bool showPickupInstructions)
@@ -202,8 +239,22 @@ public partial class CoopLeash : BaseUnityPlugin
 	{
 		return (ModManager.MSC || ModManager.CoopAvailable) && self.slugOnBack != null && !self.slugOnBack.interactionLocked && self.slugOnBack.slugcat == null && (self.spearOnBack == null || !self.spearOnBack.HasASpear);
 	}
-	
-	public static void ScoopPups(Room myRoom, IntVector2 pipeTile)
+
+    public static bool CheckLizFriend(Lizard liz)
+    {
+        float likeness = 0; //liz.AI.LikeOfPlayer(dRelation.trackerRep);
+        if (ModManager.CoopAvailable) //JUST ASSUME THIS IS ON... IF NOT, YOU DESERVE IT - Custom.rainWorld.options.friendlyLizards)
+        {
+            foreach (AbstractCreature checkCrit in liz.abstractCreature.world.game.NonPermaDeadPlayers)
+            {
+                Tracker.CreatureRepresentation player = liz.AI.tracker.RepresentationForCreature(checkCrit, false);
+                likeness = Mathf.Max(liz.AI.LikeOfPlayer(player), likeness);
+            }
+        }
+        return likeness >= 0.5f;
+    }
+
+    public static void ScoopPups(Room myRoom, IntVector2 pipeTile)
 	{
         //Debug.Log("SCOOPING PUPS");
 		for (int i = 0; i < myRoom.abstractRoom.creatures.Count; i++)
@@ -230,6 +281,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 && !checkLizard.dead
 				&& checkLizard.AI.friendTracker.friend != null
                 && checkLizard.AI.behavior != LizardAI.Behavior.ReturnPrey
+                && CheckLizFriend(checkLizard)
             )
 			{
                 if (checkLizard.inShortcut)
@@ -258,7 +310,32 @@ public partial class CoopLeash : BaseUnityPlugin
 
     private void JollyPlayerArrow_Draw(On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.orig_Draw orig, JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow self, float timeStacker)
     {
-        orig(self, timeStacker);
+        if (camScrollEnabled && CLOptions.smartCam.Value)
+        {
+            //ADJUST THE DRAW POSITION FOR THE CAMERA'S FOCUS CREATURE SO THEIR NAMEPLATE DOESN'T FLOAT IN THE MIDDLE OF THE SCREEN
+            Vector2 origBodPos = self.bodyPos;
+            Vector2 origLastBodPos = self.lastBodyPos;
+            if (!spotlightMode && self.jollyHud.RealizedPlayer != null && self.jollyHud.RealizedPlayer.room != null && self.jollyHud.RealizedPlayer.abstractCreature == self.jollyHud.Camera.followAbstractCreature)
+            {
+                self.bodyPos = self.jollyHud.RealizedPlayer.GetCat().bodyPosMemory - self.jollyHud.Camera.pos; // new Vector2 (self.jollyHud.Camera.pos.x, 0);
+                self.lastBodyPos = self.bodyPos;
+            }
+            orig(self, timeStacker);
+            self.bodyPos = origBodPos; //PUT IT BACK
+            self.lastBodyPos = origLastBodPos;
+
+            //OKAY WAIT HOW DO THESE EVEN GET DESYNCED? IS SOME OTHER MOD MESSING WITH THE SPRITE POSITION?? -OH WAIT THERES ANOTHER VERSION OF THE BODYPOS... (TARGETPOS) FORGET THAT THOUGH
+            if (self.mainSprite != null && self.label != null)
+            {
+                Vector2 namePos = self.ClampScreenEdge(self.mainSprite.GetPosition() + new Vector2(0f, 20f));
+                self.label.SetPosition(namePos);
+            }
+        }
+        else
+        {
+            orig(self, timeStacker);
+        }
+
         if (!CLOptions.waitForAll.Value)
             return;
         //HIDE STACKS OF PLAYER NAMES WAITING IN PIPES SO IT'S EASIER TO TELL WHEN SOMEONE IS NOT ALL THE WAY IN
@@ -304,7 +381,7 @@ public partial class CoopLeash : BaseUnityPlugin
             }
             else
             {
-                if (self.timeSinceSpawned > 10 && self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature != self)
+                if (CLOptions.camPenalty.Value > 0 && self.timeSinceSpawned > 10 && self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature != self)
                     self.GetCat().noCam = Math.Max(CLOptions.camPenalty.Value, 3) * 40;
 
                 orig(self);
@@ -472,8 +549,11 @@ public partial class CoopLeash : BaseUnityPlugin
                 Player plr = self.room.game.Players[i].realizedCreature as Player;
                 if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut && !plr.GetCat().defector)
                 {
-                    if (unPiped > 0 && plr.mainBodyChunk.pos.y == maxUp && maxDown < maxUp - 50) //REMEMBER THIS CREATURE, WE MIGHT NEED TO SWAP TO THEM LATER
+                    if (unPiped > 0 && (plr.mainBodyChunk.pos.y == maxUp) &&  maxUp > origBodyPos.y + 50)//self.followAbstractCreature.pos.y < maxUp - 50) //REMEMBER THIS CREATURE, WE MIGHT NEED TO SWAP TO THEM LATER
+                    {
                         swapFollower ??= plr.abstractCreature; //OH IT CAN'T BE JUST ANY CREATURE. IT NEEDS TO BE THE HIGHEST CREATURE, I THINK...
+                        //Debug.Log("SWAP " + plr.mainBodyChunk.pos.y + " FOLLOW: " + origBodyPos.y);
+                    }
                 }
             }
 
@@ -569,8 +649,10 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (!spotlightMode)
                 {
                     //OKAY NEW PLAN. TAKE THE DISTANCE WE ARE SUPPOSED TO TRAVEL, AND DOUBLE IT
+                    (self.followAbstractCreature.realizedCreature as Player).GetCat().bodyPosMemory = Vector2.Lerp(self.followAbstractCreature.realizedCreature.bodyChunks[0].pos, self.followAbstractCreature.realizedCreature.bodyChunks[1].pos, 0.33333334f);
                     Vector2 slingShot = adjPosition - self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
                     self.followAbstractCreature.realizedCreature.mainBodyChunk.pos += new Vector2(slingShot.x * 2f, slingShot.y * (turple)); //WAIT IM SO CONFUSED... DOES ONLY THE X NEED TO BE DOUBLED???
+                    (self.followAbstractCreature.realizedCreature as Player).GetCat().bodyPosMemory.y = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos.y - (slingShot.y * 1f); //ADJUST THIS TOO
                     shiftBody = true;
                 }
 			}
@@ -889,7 +971,7 @@ public partial class CoopLeash : BaseUnityPlugin
     private void ShortcutHandler_Update(On.ShortcutHandler.orig_Update orig, ShortcutHandler self) {
 
         int othersInRoom = 0;
-        int slugsInPipe = 0; 
+        int slugsInPipe = 0;
         for (int num = self.transportVessels.Count - 1; num >= 0; num--) 
         {
             if (ModManager.CoopAvailable && self.transportVessels[num]?.creature is Player player && !player.isNPC && self.transportVessels[num].room == beaconRoom?.abstractRoom) {
@@ -969,7 +1051,18 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
             }
         }
+
         orig(self);
+
+        //WE MAY STILL HAVE TIME TO DO
+        for (int num = self.transportVessels.Count - 1; num >= 0; num--)
+        {
+            if (self.transportVessels[num]?.creature is Player player2 && player2.GetCat().leavingStation > 0)
+            {
+                self.transportVessels[num].wait = player2.GetCat().leavingStation;
+                player2.GetCat().leavingStation--;
+            }
+        }
     }
 
 
@@ -1041,7 +1134,8 @@ public partial class CoopLeash : BaseUnityPlugin
         if (self is Player player && !player.isNPC)
         {
             player.GetCat().pipeType = "untubed";
-			player.GetCat().lastRoom = newRoom.roomSettings.name; 
+			player.GetCat().lastRoom = newRoom.roomSettings.name;
+            player.GetCat().leavingStation = 0;
         }
     }
 
@@ -1115,19 +1209,24 @@ public partial class CoopLeash : BaseUnityPlugin
                 orig(self, creature, room, shortCut); //WAIT, WE HAVE TO RUN OURS FIRST I THINK.
 				
                 //BUT FIRST, TURNN OFF ALL THE WAIT TIMERS
-                int waitDelay = 10;
+                int waitDelay = 6 + (self.transportVessels.Count * 4);
                 for (int num = self.transportVessels.Count - 1; num >= 0; num--) {
                     if (ModManager.CoopAvailable && self.transportVessels[num].creature is Player sluggo && !sluggo.isNPC && sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name) { //sluggo.room == beaconRoom
                         self.transportVessels[num].wait = waitDelay;
                         //MAKE THE FIRST SLUGCAT THE CAMERA OWNER -OKAY WHY DOES THIS NOT WORK???
+                        //if (waitDelay == 10)
+                            //room.game.cameras[0].followAbstractCreature = sluggo.abstractCreature;
                         //ALRIGHT FINE JUST MAKE THE PLAYER WITH THE CAMERA THE FIRST ONE TO GO THROUGH
-                        if (room.game.cameras[0].followAbstractCreature == sluggo.abstractCreature) {
-                            //Debug.Log("SEND THIS CAT FIRST " + sluggo.playerState.playerNumber);
-                            self.transportVessels[num].wait = 8;
-                        }
-						sluggo.GetCat().defector = false;
+                        //if (room.game.cameras[0].followAbstractCreature == sluggo.abstractCreature) {
+                        //    Debug.Log("SEND THIS CAT FIRST " + sluggo.playerState.playerNumber);
+                        //    self.transportVessels[num].wait = 8;
+                        //}
+                        //MAKE THE EARLIEST SLUGGO TO LEAVE THE CAMERA HOLDER (WE ITERATE BACKWARDS)
+                        room.game.cameras[0].followAbstractCreature = sluggo.abstractCreature;
+                        sluggo.GetCat().defector = false;
                         sluggo.GetCat().forcedDefect = false;
-                        waitDelay += 2;
+                        sluggo.GetCat().leavingStation = waitDelay;
+                        waitDelay -= 4;
                     }
                 }
 
@@ -1204,9 +1303,11 @@ public static class PipeStatusClass
         public string lastRoom;
 		public bool defector;
         public bool forcedDefect;
+        public int leavingStation;
         public int skipCamTrigger;
 		public int forceDepart;
 		public int noCam;
+		public Vector2 bodyPosMemory; //REMEMBER WHERE THIS PLAYER WAS BEFORE WE TELEPORT THEM FOR CAMERASCROLL
 
         public PipeStatus()
         {
@@ -1216,6 +1317,7 @@ public static class PipeStatusClass
 			this.defector = false;
             this.forcedDefect = false;
 			this.forceDepart = 0;
+			this.bodyPosMemory = new Vector2(0, 0);
         }
     }
 

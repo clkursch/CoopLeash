@@ -10,6 +10,10 @@
     <Optimize>False</Optimize>
   </PropertyGroup>
 
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
+		<Exec Command="copy /Y &quot;$(TargetDir)&quot; &quot;C:\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\StreamingAssets\mods\CoopLeash\plugins&quot;" />
+	</Target>
+
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
       <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\Mods(LEGACY)\PUBLIC-Assembly-CSharp.dll</HintPath>
