@@ -65,6 +65,8 @@ Players sitting idle in shortcut entrances will be pushed into the shortcut if a
 quick-piggyback can be done on players dangling from saint's tongue, grapple worms, or while treading surface water, regardless of if they are standing
 Added safeguards to fix an issue where a room with a player offscreen would get unloaded and the player would be unable to take camera
 Fixed an issue where disabling "allow splitting up" would make ALL shortcuts unusable while a warp beacon was active
+
+//fixed pet leash not warping tamed lizards in non-co-op games 
 */
 
 public partial class CoopLeash : BaseUnityPlugin
@@ -170,12 +172,36 @@ public partial class CoopLeash : BaseUnityPlugin
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Draw += JollyPlayerArrow_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Update += JollyPlayerArrow_Update;
 
+            //GRAPHICS FREEZES
+            //On.RoomRain.DrawSprites += RoomRain_DrawSprites;
+            On.MoreSlugcats.BlizzardGraphics.DrawSprites += BlizzardGraphics_DrawSprites;
+
             IsInit = true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex);
             throw;
+        }
+    }
+
+    int graphCounter = 40;
+    private void BlizzardGraphics_DrawSprites(On.MoreSlugcats.BlizzardGraphics.orig_DrawSprites orig, MoreSlugcats.BlizzardGraphics self, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
+    {
+        if (graphCounter <= 0)
+        {
+            orig(self, sLeaser, rCam, timeStacker, camPos);
+            graphCounter = 40;
+        }
+        sLeaser.sprites[0].isVisible = false;
+        sLeaser.sprites[1].isVisible = false;
+    }
+
+    private void RoomRain_DrawSprites(On.RoomRain.orig_DrawSprites orig, RoomRain self, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
+    {
+        if (self.intensity <= 0.1)
+        {
+            orig(self, sLeaser, rCam, timeStacker, camPos);
         }
     }
 
@@ -243,14 +269,14 @@ public partial class CoopLeash : BaseUnityPlugin
     public static bool CheckLizFriend(Lizard liz)
     {
         float likeness = 0; //liz.AI.LikeOfPlayer(dRelation.trackerRep);
-        if (ModManager.CoopAvailable) //JUST ASSUME THIS IS ON... IF NOT, YOU DESERVE IT - Custom.rainWorld.options.friendlyLizards)
-        {
-            foreach (AbstractCreature checkCrit in liz.abstractCreature.world.game.NonPermaDeadPlayers)
-            {
-                Tracker.CreatureRepresentation player = liz.AI.tracker.RepresentationForCreature(checkCrit, false);
-                likeness = Mathf.Max(liz.AI.LikeOfPlayer(player), likeness);
-            }
-        }
+        //if (ModManager.CoopAvailable) //JUST ASSUME THIS IS ON... IF NOT, YOU DESERVE IT - Custom.rainWorld.options.friendlyLizards)
+        //{
+		foreach (AbstractCreature checkCrit in liz.abstractCreature.world.game.NonPermaDeadPlayers)
+		{
+			Tracker.CreatureRepresentation player = liz.AI.tracker.RepresentationForCreature(checkCrit, false);
+			likeness = Mathf.Max(liz.AI.LikeOfPlayer(player), likeness);
+		}
+        //}
         return likeness >= 0.5f;
     }
 
@@ -349,20 +375,23 @@ public partial class CoopLeash : BaseUnityPlugin
     private void JollyPlayerArrow_Update(On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.orig_Update orig, JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow self)
     {
         orig(self);
-        
 
         Player myPlayer = self.jollyHud.RealizedPlayer;
         if (myPlayer != null && myPlayer.GetCat().noCam > 0)
         {
             int displayTime = Mathf.CeilToInt(myPlayer.GetCat().noCam / 40f);
             self.label.text = "(" + displayTime + ") " + self.playerName;
-
+            
             //if (displayTime == 0)
             //    self.label.text = self.playerName;
             //this.size.x = 5 * this.playerName.Length;
         }
         else
             self.label.text = self.playerName;
+
+        //FOR TESTING
+        //if (myPlayer != null && myPlayer.GetCat().defector)
+        //    self.label.text = "(D)" + self.label.text;
 
         self.size.x = self.label.text.Length;
     }
@@ -402,9 +431,9 @@ public partial class CoopLeash : BaseUnityPlugin
         }
 
         //IF WE ARE A DEFECTOR CALLING THE CAMERA FROM SOMEONE ELSE, SPOTLIGHT US RIGHT AWAY.
-        if (self.GetCat().defector || UnTubedSlugsInRoom(self.room) <= 1) //IF WE ARE THE ONLY PLAYER IN THE ROOM (BUT NOT THE ONLY ONE STILL ALIVE) ALLOW SWITCH
+        if (self.GetCat().defector || UnTubedSlugsInRoom(self.room) <= 1 || groupFocusCount == 1) //IF WE ARE THE ONLY PLAYER IN THE ROOM (BUT NOT THE ONLY ONE STILL ALIVE) ALLOW SWITCH
         {
-			if (self.room == null || self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature == self)
+			if (self.room == null || (self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature == self && Custom.rainWorld.options.cameraCycling))
 			{
 				cycleSwitch = true;
 				spotlightMode = false;
@@ -414,13 +443,16 @@ public partial class CoopLeash : BaseUnityPlugin
 				//IF WE'RE STEALING FROM THE MAIN GROUP, PUT A COOLDOWN ON US...
 				if (CLOptions.camPenalty.Value > 0 && !spotlightMode && self.room != null && self.room.game.AlivePlayers.Count > 2)
 					self.GetCat().noCam = Math.Max(CLOptions.camPenalty.Value, 3) * 40;
-				spotlightMode = true;
+                if (groupFocusCount == 1) //IF THERE'S ONLY ONE PERSON TO HAND IT TO, DON'T PUT IT IN SPOTLIGHT MODE. HE DON'T NEED IT
+                    spotlightMode = false;
+                else
+                    spotlightMode = true;
 			}
 		}
 		else //ELSE. WE SHOULD JUST ALWAYS JUST TOGGLE
 			spotlightMode = !spotlightMode;
 
-        //Debug.Log("CAM SWITCH: " + self.playerState.playerNumber + " - " + cycleSwitch + "  NOW SPOTLIGHTED? " + spotlightMode);
+        //Debug.Log("CAM SWITCH: " + self.playerState.playerNumber + " - " + cycleSwitch + " - " + Custom.rainWorld.options.cameraCycling + " NOW SPOTLIGHTED? " + spotlightMode);
         bool origCycle = Custom.rainWorld.options.cameraCycling;
 		if (!cycleSwitch)
 			Custom.rainWorld.options.cameraCycling = false; //PRETEND CYCLING DOESN'T EXIST 
@@ -457,6 +489,8 @@ public partial class CoopLeash : BaseUnityPlugin
         if (self.processActive && !self.GamePaused && self.cameras[0].room != null)
         {
             self.devToolsLabel.text = self.devToolsLabel.text + " : [" + beaconRoom?.roomSettings.name + "] - " + shortCutBeacon;
+            if (graphCounter > 0)
+                graphCounter--;
         }
     }
 
@@ -476,8 +510,9 @@ public partial class CoopLeash : BaseUnityPlugin
         bool shiftBody = false;
         bool requestSwap = false;
         AbstractCreature swapFollower = null;
+        groupFocusCount = 0;
 
-        if (camScrollEnabled && CLOptions.smartCam.Value && ModManager.CoopAvailable && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null)
+        if (camScrollEnabled && CLOptions.smartCam.Value && ModManager.CoopAvailable && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null && self.room.abstractRoom == self.followAbstractCreature.Room)
         {
             origFollorCrit = self.followAbstractCreature;
             origBodyPos = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
@@ -486,12 +521,12 @@ public partial class CoopLeash : BaseUnityPlugin
 			//IF WE'RE FOLLOWING A DEFECTOR, IT'S ALWAYS A SPOTLIGHT
 			if ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector)
 				spotlightMode = true;
-				
-			//THIS CHUNK IS REJOINING THE NON-SPOTLIGHT RUNNING BECAUSE FORCED DEFECTOR SPOTLIGHTS SHOULD CHECK TO AUTO REJOING
-			float maxLeft = origBodyPos.x;
-			float maxRight = origBodyPos.x;
-			float maxUp = origBodyPos.y;
-			float maxDown = origBodyPos.y;
+
+            //THIS CHUNK IS REJOINING THE NON-SPOTLIGHT RUNNING BECAUSE FORCED DEFECTOR SPOTLIGHTS SHOULD CHECK TO AUTO REJOING
+            float maxLeft = spotlightMode ? float.MaxValue : origBodyPos.x;
+            float maxRight = spotlightMode ? 0f : origBodyPos.x;
+            float maxDown = spotlightMode ? float.MaxValue : origBodyPos.y;
+            float maxUp = spotlightMode ? 0f : origBodyPos.y;
 			float totalX = 0f;
 			float totalY = 0f;
 			int totalCnt = 0;
@@ -503,7 +538,7 @@ public partial class CoopLeash : BaseUnityPlugin
 				if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room)
 				{
 					//IF WE'RE A DEFECTOR, CHECK TO SEE IF WE CAN REJOIN THE GROUP REAL QUICK
-					if (plr.GetCat().defector)
+					if (plr.GetCat().defector && !plr.inShortcut) //DON'T TRACK IN SHORTCUTS, SINCE IT SEEMS THE GAME WILL CHECK YOUR POSITION FROM THE PREVIOUS ROOM. SNEAKY LITTLE SHITE...
 					{
 						if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650 && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325) //self.lastPos
                         {
@@ -513,12 +548,15 @@ public partial class CoopLeash : BaseUnityPlugin
                             {
                                 spotlightMode = false;
                                 plr.GetCat().forcedDefect = false;
+                                plr.GetCat().camProtection = 40;
                             }
-                            //Debug.Log("UNDEFECT");
+                            //Debug.Log("UNDEFECT " + plr);
                         }  
 					}
-							
-					if (!plr.GetCat().defector && plr.GetCat().pipeType != "other") //SKIP THIS CHECK IF WE ARE TRANSITIONING BETWEEN ROOMS. OUR UPDATES ARE STILL FROM THE PREVIOUS ROOM
+
+                    //SKIP THIS CHECK IF WE ARE TRANSITIONING BETWEEN ROOMS. OUR UPDATES ARE STILL FROM THE PREVIOUS ROOM
+                    //NEW RULE! IN SPOTLIGHT MODE, THE SPOTLIGHTED PLAYER IS EXEMPT FROM THIS CALCULATION (SO THEIR MOVEMENT DOESN'T DEFECT OTHER PLAYERS WAITING IN THE MAIN GROUP
+                    if (!plr.GetCat().defector && plr.GetCat().pipeType != "other" && plr.mainBodyChunk != null) 
 					{
 						Vector2 plrPos = plr.mainBodyChunk.pos;
 						if (plrPos.x < maxLeft)
@@ -531,10 +569,18 @@ public partial class CoopLeash : BaseUnityPlugin
 							maxUp = plrPos.y;
 								
 						//KEEP TRACK OF THESE STATS. WE'LL AVERAGE OUT THE POSITIONS OF EVERYONE SHORTLY
-						totalX += plrPos.x;
-						totalY += plrPos.y;
-						totalCnt++;
-					}
+                        //ACTUALLY, SPOTLIGHTED PLAYERS CAN RUN THE ABOVE STUFF SO THEY STILL GET DEFECTED BUT THEY WON'T CONTRIBUTE TOWARDS THE GROUP AVERAGE POSITION
+                        if (!(spotlightMode && self.followAbstractCreature == plr.abstractCreature))
+                        {
+                            totalX += plrPos.x;
+                            totalY += plrPos.y;
+                            totalCnt++;
+                        }
+                        //Debug.Log("WHO THIS? " + plr.playerState.playerNumber + " - " + plrPos);
+                    }
+
+                    //if ((spotlightMode && self.followAbstractCreature == plr.abstractCreature))
+                        //Debug.Log("THAT'S MEEE " + plr.GetCat().defector + " - " + plr.GetCat().pipeType + " - " + !(spotlightMode && self.followAbstractCreature == plr.abstractCreature));
 
                     if (plr.GetCat().pipeType != "normal") //!plr.inShortcut
                     {
@@ -542,17 +588,22 @@ public partial class CoopLeash : BaseUnityPlugin
                     }
                 }
 			}
+            groupFocusCount = totalCnt;
+            //Debug.Log("CAM STATS " + " FOLLOW: " + self.followAbstractCreature.realizedCreature + " - ROOM: " + self.followAbstractCreature.Room.name);
 
             //FIND THE HIGHEST PLAYER ON SCREEN
-            for (int i = 0; i < self.room.game.Players.Count; i++)
+            if (self.room.abstractRoom == self.followAbstractCreature.Room) //OKAY APPARENTLY THE GAME WILL TRY AND RUN THIS WHILE self.room.abstractRoom DOES NOT MATCH self.followAbstractCreature WHICH IS SUPER WEIRD
             {
-                Player plr = self.room.game.Players[i].realizedCreature as Player;
-                if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut && !plr.GetCat().defector)
+                for (int i = 0; i < self.room.game.Players.Count; i++)
                 {
-                    if (unPiped > 0 && (plr.mainBodyChunk.pos.y == maxUp) &&  maxUp > origBodyPos.y + 50)//self.followAbstractCreature.pos.y < maxUp - 50) //REMEMBER THIS CREATURE, WE MIGHT NEED TO SWAP TO THEM LATER
+                    Player plr = self.room.game.Players[i].realizedCreature as Player;
+                    if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut && !plr.GetCat().defector)
                     {
-                        swapFollower ??= plr.abstractCreature; //OH IT CAN'T BE JUST ANY CREATURE. IT NEEDS TO BE THE HIGHEST CREATURE, I THINK...
-                        //Debug.Log("SWAP " + plr.mainBodyChunk.pos.y + " FOLLOW: " + origBodyPos.y);
+                        if (unPiped > 0 && (plr.mainBodyChunk.pos.y == maxUp) && maxUp > origBodyPos.y + 50)//self.followAbstractCreature.pos.y < maxUp - 50) //REMEMBER THIS CREATURE, WE MIGHT NEED TO SWAP TO THEM LATER
+                        {
+                            swapFollower ??= plr.abstractCreature; //OH IT CAN'T BE JUST ANY CREATURE. IT NEEDS TO BE THE HIGHEST CREATURE, I THINK...
+                            //Debug.Log("SWAP " + plr.mainBodyChunk.pos.y + " FOLLOW: " + origBodyPos.y + " - ROOM: " + self.room.game.Players[i].Room.name);
+                        }
                     }
                 }
             }
@@ -572,8 +623,8 @@ public partial class CoopLeash : BaseUnityPlugin
                             swapFollower ??= plr.abstractCreature; //LITERALLY JUST ANYONE. THE GAME CAN SORT IT OUT NEXT TICK IF THAT'S A PROBLEM
                     }
                 }
-
-                //Debug.Log("RUNNING THE THING" + maxLeft + " - " + maxRight + " - " + maxUp + " - " + maxDown + " - ");
+                
+                //Debug.Log("RUNNING THE THING " + maxLeft + " - " + maxRight + " - " + maxUp + " - " + maxDown + " - ");
 
                 //CHECK FOR DEFECTORS, PLAYERS WHO HAVE STRAYED TOO FAR FROM THE GROUP AVERAGE IN EITHER THE X OR Y AXIS
                 float avgX = totalX / totalCnt;
@@ -588,10 +639,10 @@ public partial class CoopLeash : BaseUnityPlugin
                     for (int i = 0; i < self.room.game.Players.Count; i++)
                     { //DO IT AGAIN....
                         Player plr = self.room.game.Players[i].realizedCreature as Player;
-                        if (plr != null && !plr.dead && !plr.GetCat().defector && self.room?.abstractRoom == self.room.game.Players[i].Room)
+                        if (plr != null && plr.GetCat().camProtection <= 0 && !plr.GetCat().defector && self.room?.abstractRoom == self.room.game.Players[i].Room)
                         {
                             float myBehind = Mathf.Abs(plr.mainBodyChunk.pos.x - avgX);
-                            if (plr.inShortcut || plr.dangerGraspTime > 30)
+                            if (plr.inShortcut || plr.dangerGraspTime > 30 || plr.dead)
                                 myBehind *= 1.35f; //PLAYERS THAT ARE GRABBED OR IN A SHORTCUT GET HIGHER PRIORITY FOR BEING CHOSEN AS DEFECTOR
                             if (myBehind > mostBehind)
                             {
@@ -607,10 +658,10 @@ public partial class CoopLeash : BaseUnityPlugin
                     for (int i = 0; i < self.room.game.Players.Count; i++)
                     { //DO IT AGAIN....
                         Player plr = self.room.game.Players[i].realizedCreature as Player;
-                        if (plr != null && !plr.dead && !plr.GetCat().defector && self.room?.abstractRoom == self.room.game.Players[i].Room)
+                        if (plr != null && plr.GetCat().camProtection <= 0 && !plr.GetCat().defector && self.room?.abstractRoom == self.room.game.Players[i].Room)
                         {
                             float myBehind = Mathf.Abs(plr.mainBodyChunk.pos.y - avgY);
-                            if (plr.inShortcut || plr.dangerGraspTime > 30)
+                            if (plr.inShortcut || plr.dangerGraspTime > 30 || plr.dead)
                                 myBehind *= 1.35f; //PLAYERS THAT ARE GRABBED OR IN A SHORTCUT GET HIGHER PRIORITY FOR BEING CHOSEN AS DEFECTOR
                             if (myBehind > mostBehind)
                             {
@@ -672,8 +723,12 @@ public partial class CoopLeash : BaseUnityPlugin
 
         //THANKS TO ALL THAT DUMB JANK FROM SBCAMERASCROLL, WE HAVE TO SWAP OUT OUR FOCUS CREATURE IF IT'S HIGHER THAN ANOTHER PLAYER ON SCREEN. YOU NITWIT
         if (swapFollower != null && !spotlightMode) //(requestSwap) // && (self.followAbstractCreature.realizedCreature as Player).timeSinceSpawned > 40)
-            self.followAbstractCreature = swapFollower; //IT'S SAFE TO JUST CHANGE THIS WITHOUT CALLING ChangeCameraToPlayer() AS LONG AS THEY ARE IN THE SAME ROOM
-        //ABSOLUTELY STUPIT
+        {
+            //Debug.Log("COOPLEASH SWAPFOLLOWER DETECTED! " + swapFollower.realizedCreature);
+            //self.followAbstractCreature = swapFollower; //IT'S SAFE TO JUST CHANGE THIS WITHOUT CALLING ChangeCameraToPlayer() AS LONG AS THEY ARE IN THE SAME ROOM
+            self.ChangeCameraToPlayer(swapFollower); //BUT THEY MIGHT NOT BE IN THE SAME ROOM. NITWIT
+            //ABSOLUTELY STUPIT
+        }
 
         //SHOW THE BEACON FX AROUND THE PIPE
         Creature creature = (self.followAbstractCreature != null) ? self.followAbstractCreature.realizedCreature : null;
@@ -779,17 +834,11 @@ public partial class CoopLeash : BaseUnityPlugin
 
     private void Player_GrabUpdate(On.Player.orig_GrabUpdate orig, Player self, bool eu)
     {
-        orig(self, eu);
-
-        //DON'T DO THIS IN ARENA
-        if (!(self.room?.game?.session is StoryGameSession))
-            return;
-
-        //SHOULD WE ATTEMPT TO CLIMB ON SOMEONES BACK?
-        if (CLOptions.quickPiggy.Value && self.input[0].pckp && !self.input[1].pckp && self.onBack == null && self.room != null && !self.isNPC && !self.pyroJumpped && !self.submerged && self.standing && self.lowerBodyFramesOffGround > 0)
+        //SHOULD WE ATTEMPT TO CLIMB ON SOMEONES BACK?  //DON'T DO THIS IN ARENA
+        if (CLOptions.quickPiggy.Value && self.input[0].pckp && !self.input[1].pckp && self.onBack == null && self.room != null && !self.isNPC && !self.pyroJumpped && !self.submerged && self.standing && self.lowerBodyFramesOffGround > 0 && !(self.room?.game?.session is StoryGameSession))
         {
             //Debug.Log("ON WHO??" + self.onBack);
-            float range = 20 + self.bodyChunks[1].rad;
+            float range = 30 + self.bodyChunks[1].rad;
             for (int i = 0; i < self.room.game.Players.Count; i++)
             {
                 if (self.room.game.Players[i].realizedCreature != null
@@ -807,11 +856,14 @@ public partial class CoopLeash : BaseUnityPlugin
                         //PUT US UP THERE!
                         newSeat.bodyChunks[0].pos += Custom.DirVec(self.firstChunk.pos, newSeat.bodyChunks[0].pos) * 2f;
                         newSeat.slugOnBack.SlugToBack(self);
+                        self.noPickUpOnRelease = 20; //AND DON'T STEAL THEIR ITEM
                         break;
                     }
                 }
             }
         }
+
+        orig(self, eu);
     }
 
 
@@ -863,7 +915,10 @@ public partial class CoopLeash : BaseUnityPlugin
 		
 		if (self.GetCat().noCam > 0)
 			self.GetCat().noCam--;
-		
+
+        if (self.GetCat().camProtection > 0)
+            self.GetCat().camProtection--;
+
         if (self.room != null && ValidPlayer(self)) {
             
             if (CLOptions.warpButton.Value && self.room == beaconRoom)
@@ -1009,7 +1064,7 @@ public partial class CoopLeash : BaseUnityPlugin
                                 forceDepart = true;
                                 //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
                                 realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
-                                myPlayer.GetCat().defector = true;
+                                //myPlayer.GetCat().defector = true; //MAYBE WE DON'T NEED TO DO THIS?...
                                 spotlightMode = true;
                                 //WIPE THE BEACON IF WE WERE THE ONLY ONE WAITING
                                 if (TubedSlugs(realizedRoom) == 1)
@@ -1259,6 +1314,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
     public static IntVector2 shortCutBeacon = new IntVector2(0, 0);
     public static Room beaconRoom;
+    public static int groupFocusCount = 0;
 
     private void ShortCutVessel_ctor(On.ShortcutHandler.ShortCutVessel.orig_ctor orig, ShortcutHandler.ShortCutVessel self, IntVector2 pos, Creature creature, AbstractRoom room, int wait) {
 
@@ -1307,6 +1363,7 @@ public static class PipeStatusClass
         public int skipCamTrigger;
 		public int forceDepart;
 		public int noCam;
+        public int camProtection;
 		public Vector2 bodyPosMemory; //REMEMBER WHERE THIS PLAYER WAS BEFORE WE TELEPORT THEM FOR CAMERASCROLL
 
         public PipeStatus()
