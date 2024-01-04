@@ -188,13 +188,18 @@ public partial class CoopLeash : BaseUnityPlugin
     int graphCounter = 40;
     private void BlizzardGraphics_DrawSprites(On.MoreSlugcats.BlizzardGraphics.orig_DrawSprites orig, MoreSlugcats.BlizzardGraphics self, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
     {
-        if (graphCounter <= 0)
+        orig(self, sLeaser, rCam, timeStacker, camPos);
+
+        //if (graphCounter <= 0)
+        //{
+        //    graphCounter = 40;
+        //}
+
+        if (ModManager.CoopAvailable)
         {
-            orig(self, sLeaser, rCam, timeStacker, camPos);
-            graphCounter = 40;
+            //sLeaser.sprites[0].isVisible = false;
+            sLeaser.sprites[1].isVisible = false;
         }
-        sLeaser.sprites[0].isVisible = false;
-        sLeaser.sprites[1].isVisible = false;
     }
 
     private void RoomRain_DrawSprites(On.RoomRain.orig_DrawSprites orig, RoomRain self, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
@@ -835,10 +840,10 @@ public partial class CoopLeash : BaseUnityPlugin
     private void Player_GrabUpdate(On.Player.orig_GrabUpdate orig, Player self, bool eu)
     {
         //SHOULD WE ATTEMPT TO CLIMB ON SOMEONES BACK?  //DON'T DO THIS IN ARENA
-        if (CLOptions.quickPiggy.Value && self.input[0].pckp && !self.input[1].pckp && self.onBack == null && self.room != null && !self.isNPC && !self.pyroJumpped && !self.submerged && self.standing && self.lowerBodyFramesOffGround > 0 && !(self.room?.game?.session is StoryGameSession))
+        if (CLOptions.quickPiggy.Value && self.input[0].pckp && !self.input[1].pckp && self.onBack == null && self.room != null && !self.isNPC && !self.pyroJumpped && !self.submerged && self.standing && self.lowerBodyFramesOffGround > 0 && (self.room?.game?.session is StoryGameSession))
         {
             //Debug.Log("ON WHO??" + self.onBack);
-            float range = 30 + self.bodyChunks[1].rad;
+            float range = 26 + self.bodyChunks[1].rad;
             for (int i = 0; i < self.room.game.Players.Count; i++)
             {
                 if (self.room.game.Players[i].realizedCreature != null
@@ -856,7 +861,7 @@ public partial class CoopLeash : BaseUnityPlugin
                         //PUT US UP THERE!
                         newSeat.bodyChunks[0].pos += Custom.DirVec(self.firstChunk.pos, newSeat.bodyChunks[0].pos) * 2f;
                         newSeat.slugOnBack.SlugToBack(self);
-                        self.noPickUpOnRelease = 20; //AND DON'T STEAL THEIR ITEM
+                        self.dontGrabStuff = 20; //AND DON'T STEAL THEIR ITEM
                         break;
                     }
                 }
