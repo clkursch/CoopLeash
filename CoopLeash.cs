@@ -851,7 +851,8 @@ public partial class CoopLeash : BaseUnityPlugin
                     && player != self
                     && player.room == self.room
                     && Custom.DistLess(self.bodyChunks[1].pos, player.bodyChunks[0].pos, range)
-                    && player.Consious 
+                    && player.Consious
+                    && (self.slugOnBack == null || self.slugOnBack.slugcat != player) //DONT PIGGYBACK ONTO SOMEONE ON OUR BACK
                     && (player.standing || player.onBack != null || (player.tongue != null && player.tongue.Attached) || player.animation == Player.AnimationIndex.SurfaceSwim || player.animation == Player.AnimationIndex.GrapplingSwing) //Standing OR on someones back
                 )
                 {
