@@ -1079,7 +1079,7 @@ public partial class CoopLeash : BaseUnityPlugin
                             }
                         }
                         else if (myPlayer.GetCat().forceDepart > 0)
-                            myPlayer.GetCat().forceDepart--; //DECAY THE VALUE IF NOT HOLDING IT
+                            myPlayer.GetCat().forceDepart = 0; //DECAY THE VALUE IF NOT HOLDING IT
                     }
 				}
 
