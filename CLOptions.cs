@@ -13,9 +13,10 @@ public class CLOptions : OptionInterface
     {
         Logger = loggerSource;
         PlayerSpeed = this.config.Bind<float>("PlayerSpeed", 1f, new ConfigAcceptableRange<float>(0f, 100f));
-		CLOptions.proxDist = this.config.Bind<int>("proxDist", 25, new ConfigAcceptableRange<int>(5, 200));
+		CLOptions.proxDist = this.config.Bind<int>("proxDist", 25, new ConfigAcceptableRange<int>(5, 100));
 		CLOptions.camPenalty = this.config.Bind<int>("camPenalty", 0, new ConfigAcceptableRange<int>(0, 10));
-		CLOptions.waitForAll = this.config.Bind<bool>("waitForAll", true);
+        CLOptions.zoomLimit = this.config.Bind<float>("zoomLimit", 0.75f, new ConfigAcceptableRange<float>(0.5f, 1.0f));
+        CLOptions.waitForAll = this.config.Bind<bool>("waitForAll", true);
         CLOptions.allowForceDepart = this.config.Bind<bool>("allowForceDepart", true);
         CLOptions.allowDeadCam = this.config.Bind<bool>("allowDeadCam", false);
         CLOptions.allowSplitUp = this.config.Bind<bool>("allowSplitUp", true);
@@ -30,7 +31,8 @@ public class CLOptions : OptionInterface
     public readonly Configurable<float> PlayerSpeed;
 	public static Configurable<int> proxDist;
 	public static Configurable<int> camPenalty;
-	public static Configurable<bool> waitForAll;
+    public static Configurable<float> zoomLimit;
+    public static Configurable<bool> waitForAll;
     public static Configurable<bool> allowForceDepart;
     public static Configurable<bool> allowDeadCam;
     public static Configurable<bool> allowSplitUp;
@@ -44,7 +46,8 @@ public class CLOptions : OptionInterface
     private UIelement[] UIArrPlayerOptions;
 
 	public OpSlider pDistOp;
-	public OpCheckBox mpBox1;
+    public OpFloatSlider pZoomOp;
+    public OpCheckBox mpBox1;
     public OpCheckBox mpBox2;
 	public OpCheckBox mpBox3;
 	public OpCheckBox mpBox5;
@@ -171,6 +174,18 @@ public class CLOptions : OptionInterface
             new OpLabel(mpBox6.pos.x + 0, mpBox6.pos.y+23, "(" + Translate("Requires SBCameraScroll mod") + ")")
         });
 
+
+        dsc = Translate("Limits how far the camera can zoom out as players spread out. Lower numbers mean increased range");
+        int barLngtInt = 120;
+        
+        Tabs[0].AddItems(new UIelement[]
+        {
+            pZoomOp = new OpFloatSlider(CLOptions.zoomLimit, new Vector2(margin + 450, lineCount), barLngtInt, 1, false) {description = dsc},
+            new OpLabel(pZoomOp.pos.x - 20, pZoomOp.pos.y - 15, Translate("Zoom-Out Limit"), bigText: false)
+            {alignment = FLabelAlignment.Center}
+        });
+
+        if (CoopLeash.camScrollEnabled)
 
 
 

@@ -51,6 +51,9 @@
       <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\MonoMod.Utils.dll</HintPath>
 		<Private>false</Private>
     </Reference>
+    <Reference Include="SBCameraScroll">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\2928752589\plugins\SBCameraScroll.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEngine">
       <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\UnityEngine.dll</HintPath>
 		<Private>false</Private>

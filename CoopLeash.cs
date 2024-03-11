@@ -91,6 +91,7 @@ public partial class CoopLeash : BaseUnityPlugin
 	public static bool camScrollEnabled = false;
 	public static bool swallowAnythingEnabled = false;
     public static bool improvedInputEnabled = false;
+    public static bool splitScreenEnabled = false;
 
     private void OnEnable()
     {
@@ -132,9 +133,9 @@ public partial class CoopLeash : BaseUnityPlugin
                     rotundWorldEnabled = true;
                 }
 				if (ModManager.ActiveMods[i].id == "SBCameraScroll")
-                {
                     camScrollEnabled = true;
-                }
+                if (ModManager.ActiveMods[i].id == "henpemaz_splitscreencoop")
+                    splitScreenEnabled = true;
                 if (ModManager.ActiveMods[i].id == "swalloweverything")
                     swallowAnythingEnabled = true;
                 if (ModManager.ActiveMods[i].id == "improved-input-config")
@@ -183,6 +184,11 @@ public partial class CoopLeash : BaseUnityPlugin
             Logger.LogError(ex);
             throw;
         }
+    }
+
+    public static bool SmartCameraActive()
+    {
+        return (CLOptions.smartCam.Value && (camScrollEnabled || splitScreenEnabled));
     }
 
     int graphCounter = 40;
@@ -341,7 +347,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
     private void JollyPlayerArrow_Draw(On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.orig_Draw orig, JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow self, float timeStacker)
     {
-        if (camScrollEnabled && CLOptions.smartCam.Value)
+        if (SmartCameraActive())
         {
             //ADJUST THE DRAW POSITION FOR THE CAMERA'S FOCUS CREATURE SO THEIR NAMEPLATE DOESN'T FLOAT IN THE MIDDLE OF THE SCREEN
             Vector2 origBodPos = self.bodyPos;
@@ -349,11 +355,21 @@ public partial class CoopLeash : BaseUnityPlugin
             if (!spotlightMode && self.jollyHud.RealizedPlayer != null && self.jollyHud.RealizedPlayer.room != null && self.jollyHud.RealizedPlayer.abstractCreature == self.jollyHud.Camera.followAbstractCreature)
             {
                 self.bodyPos = self.jollyHud.RealizedPlayer.GetCat().bodyPosMemory - self.jollyHud.Camera.pos; // new Vector2 (self.jollyHud.Camera.pos.x, 0);
+                //self.bodyPos = Vector2.Lerp(self.jollyHud.Camera.pos, self.jollyHud.RealizedPlayer.GetCat().bodyPosMemory, Mathf.Lerp(GetCameraZoom(), 1f, 0.5f)) - self.jollyHud.Camera.pos;
+                //OKAY IT'S ONE OF THESE ONES THAT WE ONLY WANT TO APPLY TO THE X AXIS...
+                //float bodpX = Mathf.Lerp(self.jollyHud.Camera.pos.x, self.jollyHud.RealizedPlayer.GetCat().bodyPosMemory.x, Mathf.Lerp(GetCameraZoom(), 1f, 0.5f)) - self.jollyHud.Camera.pos.x;
+                //float bodpY = Mathf.Lerp(self.jollyHud.Camera.pos.y, self.jollyHud.RealizedPlayer.GetCat().bodyPosMemory.y, GetCameraZoom()) - self.jollyHud.Camera.pos.y;
+                //self.bodyPos = new Vector2(bodpX, bodpY);
                 self.lastBodyPos = self.bodyPos;
             }
             orig(self, timeStacker);
             self.bodyPos = origBodPos; //PUT IT BACK
             self.lastBodyPos = origLastBodPos;
+
+            //TRY TO CENTER THEM
+            Vector2 centerScreen = new Vector2(self.jollyHud.hud.rainWorld.options.ScreenSize.x / 2f, self.jollyHud.hud.rainWorld.options.ScreenSize.y / 2f);
+            Vector2 zoomAdjusted = Vector2.Lerp(centerScreen, self.mainSprite.GetPosition(), GetCameraZoom());
+            self.mainSprite.SetPosition(zoomAdjusted);
 
             //OKAY WAIT HOW DO THESE EVEN GET DESYNCED? IS SOME OTHER MOD MESSING WITH THE SPRITE POSITION?? -OH WAIT THERES ANOTHER VERSION OF THE BODYPOS... (TARGETPOS) FORGET THAT THOUGH
             if (self.mainSprite != null && self.label != null)
@@ -407,7 +423,7 @@ public partial class CoopLeash : BaseUnityPlugin
         if (CLOptions.allowDeadCam.Value == false && self.dead)
             return;
 
-        if ((camScrollEnabled == false || CLOptions.smartCam.Value == false || self.timeSinceSpawned < 10))
+        if (SmartCameraActive() == false || self.timeSinceSpawned < 10)
         {
             if (self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature != self && self.GetCat().noCam > 40)
             {
@@ -430,7 +446,7 @@ public partial class CoopLeash : BaseUnityPlugin
 		bool cycleSwitch = false;
 
         //IF WE ARE NOT IN THE MAIN GROUP, ADD TIME
-        if ((self.GetCat().defector || !(CLOptions.smartCam.Value && camScrollEnabled)) && self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature != self && self.GetCat().noCam > 40)
+        if ((self.GetCat().defector || !SmartCameraActive()) && self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature != self && self.GetCat().noCam > 40)
         {
             return;
         }
@@ -463,6 +479,9 @@ public partial class CoopLeash : BaseUnityPlugin
 			Custom.rainWorld.options.cameraCycling = false; //PRETEND CYCLING DOESN'T EXIST 
         orig(self);
         Custom.rainWorld.options.cameraCycling = origCycle;
+
+        if (camScrollEnabled && !spotlightMode)
+            SBResetZoom();
     }
 
     private void Player_ctor(On.Player.orig_ctor orig, Player self, AbstractCreature abstractCreature, World world)
@@ -497,6 +516,15 @@ public partial class CoopLeash : BaseUnityPlugin
             if (graphCounter > 0)
                 graphCounter--;
         }
+
+        if (splitScreenEnabled)
+            SplitscreenUpdate(self);
+    }
+
+    public static void SplitscreenUpdate(RainWorldGame self)
+    {
+        if (!self.IsStorySession) return;
+        if (self.GamePaused) return;
     }
 
     public const int tickMax = 20;
@@ -506,7 +534,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
 
     bool spotlightMode = false;
-    private void RoomCamera_Update(On.RoomCamera.orig_Update orig, RoomCamera self) 
+    public void RoomCamera_Update(On.RoomCamera.orig_Update orig, RoomCamera self) 
     {
         //OKAY. SO I'VE GOT A CRAZY IDEA....
         AbstractCreature origFollorCrit = null;
@@ -517,7 +545,7 @@ public partial class CoopLeash : BaseUnityPlugin
         AbstractCreature swapFollower = null;
         groupFocusCount = 0;
 
-        if (camScrollEnabled && CLOptions.smartCam.Value && ModManager.CoopAvailable && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null && self.room.abstractRoom == self.followAbstractCreature.Room)
+        if (SmartCameraActive() && ModManager.CoopAvailable && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null && self.room.abstractRoom == self.followAbstractCreature.Room)
         {
             origFollorCrit = self.followAbstractCreature;
             origBodyPos = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
@@ -636,8 +664,21 @@ public partial class CoopLeash : BaseUnityPlugin
                 float avgY = totalY / totalCnt;
                 Player mostBehindPlayer = null;
                 float mostBehind = 0;
-                float xLimit = 1300;
-                float yLimit = 700;
+                float xLimit = 1300 * (1f / GetCameraZoom());
+                float yLimit = 700 * (1f / GetCameraZoom());
+
+                if (camScrollEnabled)
+                {
+                    if (unPiped == 1 || spotlightMode) //WE SKIP SOME OF THE IMPORTANT MAXLEFT/RIGHT CALCULATIONS IN SPOTLIGHT MODE, OOPS
+                        SBCameraZoom(self, 0f, 0f);
+                    else
+                        SBCameraZoom(self, Mathf.Abs(maxLeft - maxRight), Mathf.Abs(maxUp - maxDown));
+                }
+                else
+                {
+                    //DONOTHING
+                }
+
                 //X LIMIT
                 if (Mathf.Abs(maxLeft - maxRight) > xLimit)
                 {
@@ -684,13 +725,12 @@ public partial class CoopLeash : BaseUnityPlugin
                     if (!spotlightMode) //DON'T APPLY THIS IN SPOTLIGHT MODE OR IT WOULD APPLY TO PLAYERS WHO TAKE SPOTLIGHT AND WALK AWAY
                         mostBehindPlayer.GetCat().forcedDefect = true;
                     if (mostBehindPlayer.abstractCreature == self.followAbstractCreature)
-					{
+                    {
                         if (self.hud?.jollyMeter != null)
-							self.hud.jollyMeter.customFade = 10f; //SHOW THE HUD FOR A SECOND SO THEY KNOW THINGS CHANGED
-						mostBehindPlayer.GetCat().noCam = CLOptions.camPenalty.Value * 40; //GIVE THEM A CAM DELAY
-					}
+                            self.hud.jollyMeter.customFade = 10f; //SHOW THE HUD FOR A SECOND SO THEY KNOW THINGS CHANGED
+                        mostBehindPlayer.GetCat().noCam = CLOptions.camPenalty.Value * 40; //GIVE THEM A CAM DELAY
+                    }
                 }
-                        
 
                 //WTF IS SBCAMERASCROLL DOING?!?! WHY DOES THE FOCUS CREATURE NOT ALLOW CAMERA POS TO EVER GO ABOVE THEM!!! STUPIT.
                 //if (!spotlightMode && unPiped > 1 && self.followAbstractCreature.realizedCreature.mainBodyChunk.pos.y > maxDown) // && maxDown < maxUp - 50)
@@ -739,9 +779,11 @@ public partial class CoopLeash : BaseUnityPlugin
         Creature creature = (self.followAbstractCreature != null) ? self.followAbstractCreature.realizedCreature : null;
         if (creature != null && creature is Player && beaconRoom != null && self.room == beaconRoom && tickClock <= 0) {
             float lifetime = 25f;
-            float strainMag = 40f;
             IntVector2 pos = shortCutBeacon;
-            self.room.AddObject(new ExplosionSpikes(self.room, pos.ToVector2() * 20f, 15, 15f, lifetime, 5.0f, strainMag, new Color(1f, 1f, 1f, 0.9f)));
+            bool warpAvailable = !CLOptions.warpButton.Value || (CheckBodyCountPreq(self.room) && CheckProxPreq(self.room));
+            float strainMag = warpAvailable ? 40f : 15f;
+            float mult = warpAvailable ? 1f : 1f;
+            self.room.AddObject(new ExplosionSpikes(self.room, pos.ToVector2() * 20f, 15, 15f, lifetime, 5.0f, strainMag, new Color(1f, 1f, 1f, 0.9f * mult)));
             tickClock = tickMax;
         }
 
@@ -760,6 +802,69 @@ public partial class CoopLeash : BaseUnityPlugin
             }
         }
     }
+
+    public static void SBCameraZoom(RoomCamera self, float xExtra, float yExtra)
+    {
+        if (splitScreenEnabled)
+            return; //NOT COMPATIBLE WITH THE ZOOM FEATURE ATM, UNFORTUNATELY...
+        
+        float xLimit = 1100;
+        float yLimit = 600;
+        float baseZoom = SBCameraScroll.MainModOptions.camera_zoom_slider.Value / 10f; //1f;
+        float zoomMod = 1f + Mathf.Max((xExtra - xLimit) / xLimit, (yExtra - yLimit) / yLimit, 0f);
+        float zoomLimit = CLOptions.zoomLimit.Value;
+        zoomMod = Mathf.Max(baseZoom * (1f / zoomMod), zoomLimit);
+        //Debug.Log("ZOOM: " + zoomMod + " - " + xExtra);
+
+        if (SBCameraScroll.RoomCameraMod.camera_zoom != zoomMod)
+        {
+            SBCameraScroll.RoomCameraMod.camera_zoom = zoomMod;
+            //SBCameraScroll.RoomCameraMod.Apply_Camera_Zoom(self); //THIS DOESN'T RUN IF CAMERA ZOOM == 1
+            ApplyCameraZoom(self, zoomMod);
+        }
+    }
+
+    //COPIED FROM SBCAMERA SCROLL, WHICH WAS COPIED FROM EYEBROW RAISE MOD. (OUR VERSION STILL RUNS WHEN CAMERA ZOOM == 1)
+    public static void ApplyCameraZoom(RoomCamera room_camera, float camera_zoom)
+    {
+        for (int sprite_layer_index = 0; sprite_layer_index < 11; ++sprite_layer_index)
+        {
+            FContainer sprite_layer = room_camera.SpriteLayers[sprite_layer_index];
+            sprite_layer.scale = 1f;
+            sprite_layer.SetPosition(Vector2.zero);
+            sprite_layer.ScaleAroundPointRelative(0.5f * room_camera.sSize, camera_zoom, camera_zoom);
+        }
+    }
+
+
+    public static float GetCameraZoom()
+    {
+        if (camScrollEnabled)
+            return GetSBCameraZoom();
+        else
+            return 1f;
+    }
+
+    public static float GetSBCameraZoom()
+    {
+        if (SBCameraScroll.RoomCameraMod.Is_Camera_Zoom_Enabled)
+            return SBCameraScroll.RoomCameraMod.camera_zoom;
+        else
+            return 1f;
+    }
+
+    //RESET OUR CAMERA ZOOM OUT TO MAX, TO CATCH PLAYERS IN RANGE OF THE GROUP CAMERA AS WE SWITCH AWAY FROM SPOTLIGHT MODE
+    public static void SBResetZoom()
+    {
+        if (splitScreenEnabled)
+            return; //NOT COMPATIBLE WITH THE ZOOM FEATURE ATM, UNFORTUNATELY...
+
+        SBCameraScroll.RoomCameraMod.camera_zoom = CLOptions.zoomLimit.Value;
+    }
+
+
+
+
 
     public static bool ValidPlayer(Player player)
     {
@@ -900,6 +1005,33 @@ public partial class CoopLeash : BaseUnityPlugin
             return player.WantsToWarp();
     }
 
+
+    public bool CheckBodyCountPreq(Room room)
+    {
+        return !CLOptions.bodyCountReq.Value || TubedSlugs(room) >= UnTubedSlugsInRoom(room);
+    }
+
+    public bool CheckProxPreq(Room room)
+    {
+        if (!CLOptions.bodyCountReq.Value)
+            return true;
+
+        bool result = false;
+        foreach (var absPlayer in room.world.game.AlivePlayers)
+        {
+            if (absPlayer.realizedCreature != null && absPlayer.realizedCreature is Player player && player.room == beaconRoom && ValidPlayer(player) && !player.inShortcut)
+            {
+                if (Custom.DistLess(player.bodyChunks[0].pos, player.room.MiddleOfTile(shortCutBeacon), CLOptions.proxDist.Value * 20))
+                {
+                    result = true;
+                    break;
+                } 
+            }
+        }
+        return result;
+    }
+
+
     private void Player_Update(On.Player.orig_Update orig, Player self, bool eu) 
     {
         orig(self, eu);
@@ -931,7 +1063,7 @@ public partial class CoopLeash : BaseUnityPlugin
             {
                 //CHECK FOR DISTANCE REQUIREMENTS TO TELEPORT! //CHECK IF ENOUGH SLUGS ARE IN THE TUBE TO ALLOW TELEPORT
                 bool distReq = !CLOptions.proximityReq.Value || Custom.DistLess(self.bodyChunks[0].pos, self.room.MiddleOfTile(shortCutBeacon), CLOptions.proxDist.Value * 20);
-                bool bodyReq = !CLOptions.bodyCountReq.Value || TubedSlugs(self.room) >= UnTubedSlugsInRoom(self.room);
+                bool bodyReq = CheckBodyCountPreq(self.room);
 
                 //TAP MAP TO TELEPORT!
                 if (distReq && bodyReq && self.onBack == null) // && !(rotundWorldEnabled && self.room.abstractRoom.shelter)
