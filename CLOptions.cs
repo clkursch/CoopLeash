@@ -15,7 +15,7 @@ public class CLOptions : OptionInterface
         PlayerSpeed = this.config.Bind<float>("PlayerSpeed", 1f, new ConfigAcceptableRange<float>(0f, 100f));
 		CLOptions.proxDist = this.config.Bind<int>("proxDist", 25, new ConfigAcceptableRange<int>(5, 100));
 		CLOptions.camPenalty = this.config.Bind<int>("camPenalty", 0, new ConfigAcceptableRange<int>(0, 10));
-        CLOptions.zoomLimit = this.config.Bind<float>("zoomLimit", 0.75f, new ConfigAcceptableRange<float>(0.5f, 1.0f));
+        CLOptions.zoomLimit = this.config.Bind<float>("zoomLimit", 0.5f, new ConfigAcceptableRange<float>(0.5f, 1.0f));
         CLOptions.waitForAll = this.config.Bind<bool>("waitForAll", true);
         CLOptions.allowForceDepart = this.config.Bind<bool>("allowForceDepart", true);
         CLOptions.allowDeadCam = this.config.Bind<bool>("allowDeadCam", false);
@@ -185,7 +185,7 @@ public class CLOptions : OptionInterface
             {alignment = FLabelAlignment.Center}
         });
 
-        if (CoopLeash.camScrollEnabled)
+        //if (CoopLeash.camScrollEnabled)
 
 
 
