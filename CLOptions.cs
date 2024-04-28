@@ -15,7 +15,7 @@ public class CLOptions : OptionInterface
         PlayerSpeed = this.config.Bind<float>("PlayerSpeed", 1f, new ConfigAcceptableRange<float>(0f, 100f));
 		CLOptions.proxDist = this.config.Bind<int>("proxDist", 25, new ConfigAcceptableRange<int>(5, 100));
 		CLOptions.camPenalty = this.config.Bind<int>("camPenalty", 0, new ConfigAcceptableRange<int>(0, 10));
-        CLOptions.zoomLimit = this.config.Bind<float>("zoomLimit", 0.5f, new ConfigAcceptableRange<float>(0.5f, 1.0f));
+        CLOptions.zoomLimit = this.config.Bind<float>("zoomLimit", 0.5f, new ConfigAcceptableRange<float>(0.0f, 0.5f));
         CLOptions.waitForAll = this.config.Bind<bool>("waitForAll", true);
         CLOptions.allowForceDepart = this.config.Bind<bool>("allowForceDepart", true);
         CLOptions.allowDeadCam = this.config.Bind<bool>("allowDeadCam", false);
@@ -26,6 +26,8 @@ public class CLOptions : OptionInterface
         CLOptions.quickPiggy = this.config.Bind<bool>("quickPiggy", true);
         CLOptions.smartCam = this.config.Bind<bool>("smartCam", true);
 		CLOptions.bringPups = this.config.Bind<bool>("bringPups", true);
+        CLOptions.autoSplitScreen = this.config.Bind<bool>("autoSplitScreen", true);
+        CLOptions.latencyMode = this.config.Bind<bool>("latencyMode", true);
     }
 
     public readonly Configurable<float> PlayerSpeed;
@@ -42,6 +44,8 @@ public class CLOptions : OptionInterface
     public static Configurable<bool> quickPiggy;
     public static Configurable<bool> smartCam;
 	public static Configurable<bool> bringPups;
+    public static Configurable<bool> autoSplitScreen;
+    public static Configurable<bool> latencyMode;
 
     private UIelement[] UIArrPlayerOptions;
 
@@ -55,7 +59,12 @@ public class CLOptions : OptionInterface
     public OpCheckBox mpBox7;
     public OpCheckBox mpBox8;
     public OpCheckBox mpBox10;
+    public OpCheckBox mpBox11;
+    public OpCheckBox mpBox12;
     public OpLabel lblOp1;
+
+    public static bool splitScreenEnabled;
+    public static bool camScrollEnabled;
 
 
     public override void Initialize()
@@ -108,6 +117,16 @@ public class CLOptions : OptionInterface
         });
 
 
+        dsc = Translate("Tamed lizards and slugpups will teleport to you as you enter pipes");
+        Tabs[0].AddItems(new UIelement[]
+        {
+            mpBox7 = new OpCheckBox(CLOptions.bringPups, new Vector2(margin + 450, lineCount))
+            {description = dsc},
+            new OpLabel(mpBox7.pos.x + 30, mpBox7.pos.y+3, Translate("Pet Leash"))
+            {description = dsc}
+        });
+
+
         lineCount -= 50;
         dsc = Translate("Allow players to enter a pipe if a warp beacon is already active on a different pipe in the room");
         Tabs[0].AddItems(new UIelement[]
@@ -119,16 +138,26 @@ public class CLOptions : OptionInterface
         });
 
 
-        dsc = Translate("Tamed lizards and slugpups will teleport to you as you enter pipes");
+        OpCheckBox mpBox9;
+        dsc = Translate("Allow dead players to request camera focus");
         Tabs[0].AddItems(new UIelement[]
         {
-            mpBox7 = new OpCheckBox(CLOptions.bringPups, new Vector2(margin + 300, lineCount))
+            mpBox9 = new OpCheckBox(CLOptions.allowDeadCam, new Vector2(margin + 450, lineCount))
             {description = dsc},
-            new OpLabel(mpBox7.pos.x + 30, mpBox7.pos.y+3, Translate("Pet Leash"))
+            new OpLabel(mpBox9.pos.x + 30, mpBox9.pos.y+3, Translate("Death Cam"))
             {description = dsc}
         });
 
 
+        dsc = Translate("Number of seconds a player must wait to call the camera again after taking it from the main group");
+        int barLngt2 = 40 * 3;
+        OpSlider pCamOp;
+        Tabs[0].AddItems(new UIelement[]
+        {
+            pCamOp = new OpSlider(CLOptions.camPenalty, new Vector2(margin + 310, lineCount), barLngt2) {description = dsc},
+            new OpLabel(pCamOp.pos.x -20, pCamOp.pos.y - 15, Translate("Camera Stealing Cooldown"), bigText: false)
+            {alignment = FLabelAlignment.Left}
+        });
 
         lineCount -= 50;
         dsc = Translate("Allow players to hold JUMP to depart through pipes without waiting for other players");
@@ -141,16 +170,7 @@ public class CLOptions : OptionInterface
         });
 
 
-        OpCheckBox mpBox9;
-        dsc = Translate("Allow dead players to request camera focus");
-        Tabs[0].AddItems(new UIelement[]
-        {
-            mpBox9 = new OpCheckBox(CLOptions.allowDeadCam, new Vector2(margin + 300, lineCount))
-            {description = dsc},
-            new OpLabel(mpBox9.pos.x + 30, mpBox9.pos.y+3, Translate("Death Cam"))
-            {description = dsc}
-        });
-
+        
 
         lineCount -= 50;
 		dsc = Translate("Press Map to teleport to players in pipes") + Translate("(keybind can be changed with the Improved Input Config mod)");
@@ -163,11 +183,20 @@ public class CLOptions : OptionInterface
 		});
 
 
-        
+        dsc = Translate("Disables certain weather visual effects that cripple stream quality of remote-play sessions (Room shaking and blizzard shaders) (only applies to co-op games)");
+        Tabs[0].AddItems(new UIelement[]
+        {
+            mpBox12 = new OpCheckBox(CLOptions.latencyMode, new Vector2(margin + 300, lineCount + 50f))
+            {description = dsc},
+            new OpLabel(mpBox12.pos.x + 30, mpBox12.pos.y+3, Translate("Remote Play Latency Mode"))
+            {description = dsc}
+        });
+
+
         dsc = Translate("The camera will pan towards the center of the group");
         Tabs[0].AddItems(new UIelement[]
         {
-            mpBox6 = new OpCheckBox(CLOptions.smartCam, new Vector2(margin  + 300, lineCount))
+            mpBox6 = new OpCheckBox(CLOptions.smartCam, new Vector2(margin  + 360, lineCount - 20f))
             {description = dsc},
             new OpLabel(mpBox6.pos.x + 30, mpBox6.pos.y+3, Translate("Smart Camera"))
             {description = dsc},
@@ -175,18 +204,28 @@ public class CLOptions : OptionInterface
         });
 
 
-        dsc = Translate("Limits how far the camera can zoom out as players spread out. Lower numbers mean increased range");
+        dsc = Translate("Limits how far the camera can zoom out as players spread out. (0 means no zoom)");
         int barLngtInt = 120;
         
         Tabs[0].AddItems(new UIelement[]
         {
-            pZoomOp = new OpFloatSlider(CLOptions.zoomLimit, new Vector2(margin + 450, lineCount), barLngtInt, 1, false) {description = dsc},
-            new OpLabel(pZoomOp.pos.x - 20, pZoomOp.pos.y - 15, Translate("Zoom-Out Limit"), bigText: false)
-            {alignment = FLabelAlignment.Center}
+            pZoomOp = new OpFloatSlider(CLOptions.zoomLimit, new Vector2(margin + 380, lineCount -20f -35f), barLngtInt, 1, false) {description = dsc},
+            new OpLabel(pZoomOp.pos.x - 5, pZoomOp.pos.y - 15, Translate("Zoom-Out Limit"), bigText: false) {alignment = FLabelAlignment.Center}
+            //new OpLabel(pZoomOp.pos.x - 20, pZoomOp.pos.y, Translate("Off"), bigText: false) {alignment = FLabelAlignment.Left}
         });
 
         //if (CoopLeash.camScrollEnabled)
 
+
+        dsc = Translate("Automatically split the screen when a player is offscreen. If disabled, the screen will not split until a player calls the camera from offscreen.");
+        Tabs[0].AddItems(new UIelement[]
+        {
+            mpBox11 = new OpCheckBox(CLOptions.autoSplitScreen, new Vector2(margin  + 360, lineCount - 20f -110f))
+            {description = dsc},
+            new OpLabel(mpBox11.pos.x + 30, mpBox11.pos.y+3, Translate("Auto Split Off-Screen"))
+            {description = dsc},
+            new OpLabel(mpBox11.pos.x + 0, mpBox11.pos.y+23, "(" + Translate("Requires SplitScreen Co-op mod") + ")")
+        });
 
 
         // margin += 150;
@@ -213,30 +252,22 @@ public class CLOptions : OptionInterface
 		});
 
         //IF I EVER WANT TO CHANGE THIS... OpUpdown should be the way to go
+        lineCount -= 38;
         dsc = Translate("Tiles");
         int barLngt = 90 * 3;
         float sldPad = 15;
         Tabs[0].AddItems(new UIelement[]
         {
-            pDistOp = new OpSlider(CLOptions.proxDist, new Vector2(margin + 250, lineCount-5), barLngt)
+            pDistOp = new OpSlider(CLOptions.proxDist, new Vector2(margin + 45, lineCount), barLngt)
             {description = dsc},
-            lblOp1 = new OpLabel(pDistOp.pos.x + ((barLngt * 1) / 5f), pDistOp.pos.y + 30, Translate("Tiles"), bigText: false)
-            {alignment = FLabelAlignment.Center}
+            //lblOp1 = new OpLabel(pDistOp.pos.x + ((barLngt * 1) / 5f), pDistOp.pos.y + 30, Translate("Tiles"), bigText: false)
+            lblOp1 = new OpLabel(pDistOp.pos.x - 15f, pDistOp.pos.y + 20, Translate("Tiles"), bigText: false)
+            {alignment = FLabelAlignment.Left}
 			// new OpLabel(pCountOp.pos.x - sldPad, pCountOp.pos.y +5, "4"),
 			// new OpLabel(pCountOp.pos.x + (barLngt * 1) + sldPad -5, pCountOp.pos.y +5, "8")
 		});
 		
 		
-		lineCount -= 45;
-		dsc = Translate("Number of seconds a player must wait to call the camera again after taking it from the main group");
-        barLngt = 50 * 3;
-		OpSlider pCamOp;
-        Tabs[0].AddItems(new UIelement[]
-        {
-            pCamOp = new OpSlider(CLOptions.camPenalty, new Vector2(margin + 200, lineCount), barLngt) {description = dsc},
-            new OpLabel(pCamOp.pos.x - 20, pCamOp.pos.y - 15, Translate("Camera Stealing Cooldown"), bigText: false)
-            {alignment = FLabelAlignment.Center}
-		});
 
 
         
@@ -267,8 +298,6 @@ public class CLOptions : OptionInterface
         descLine -= 20;
         Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Getting too far off-screen will remove you from group focus until you get close enough to re-group")));
 
-
-
     }
 
     public override void Update()
@@ -286,9 +315,14 @@ public class CLOptions : OptionInterface
         {
 			bool waitForAll = this.mpBox1.GetValueBool();
 			bool pipeWarping = this.mpBox5.GetValueBool();
+            bool smartCam = this.mpBox6.GetValueBool();
 
             if (!CoopLeash.camScrollEnabled)
+            {
                 this.mpBox6.greyedOut = true;
+                smartCam = false;
+            }
+                
 
 
             if (!waitForAll)
@@ -331,6 +365,21 @@ public class CLOptions : OptionInterface
                 this.pDistOp.greyedOut = true;
                 this.lblOp1.Hide();
             }
+
+
+            if (smartCam)
+            {
+                this.pZoomOp.greyedOut = false;
+            }
+            else
+            {
+                this.pZoomOp.greyedOut = true;
+            }
+
+            if (CoopLeash.splitScreenEnabled && smartCam)
+                this.mpBox11.greyedOut = false;
+            else
+                this.mpBox11.greyedOut = true;
         }
 
 

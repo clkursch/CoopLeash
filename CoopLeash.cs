@@ -99,6 +99,7 @@ public partial class CoopLeash : BaseUnityPlugin
     public static bool splitScreenEnabled = false;
     public static float internalCamZoom = 1f;
     public static float baseCameraZoom = 1f;
+    public static bool zoomEnabled = true;
 
     private void OnEnable()
     {
@@ -158,11 +159,11 @@ public partial class CoopLeash : BaseUnityPlugin
 				if (ModManager.ActiveMods[i].id == "SBCameraScroll")
                     camScrollEnabled = true;
                 if (ModManager.ActiveMods[i].id == "henpemaz_splitscreencoop")
-                    //splitScreenEnabled = true;
+                    splitScreenEnabled = true;
                 if (ModManager.ActiveMods[i].id == "swalloweverything")
                     swallowAnythingEnabled = true;
-                //if (ModManager.ActiveMods[i].id == "improved-input-config")
-                    //improvedInputEnabled = true;
+                if (ModManager.ActiveMods[i].id == "improved-input-config")
+                    improvedInputEnabled = true;
             }
 
             //Your hooks go here
@@ -199,6 +200,7 @@ public partial class CoopLeash : BaseUnityPlugin
             //GRAPHICS FREEZES
             //On.RoomRain.DrawSprites += RoomRain_DrawSprites;
             On.MoreSlugcats.BlizzardGraphics.DrawSprites += BlizzardGraphics_DrawSprites;
+            On.GlobalRain.Update += GlobalRain_Update;
 
             IsInit = true;
         }
@@ -211,19 +213,26 @@ public partial class CoopLeash : BaseUnityPlugin
 
     public static bool SmartCameraActive()
     {
-        return (CLOptions.smartCam.Value && (camScrollEnabled));  //|| splitScreenEnabled
+        return (CLOptions.smartCam.Value && (camScrollEnabled || splitScreenEnabled));  //
+    }
+
+    private void GlobalRain_Update(On.GlobalRain.orig_Update orig, GlobalRain self)
+    {
+        orig(self);
+        //if (self.progression == 1f)
+        //float dampener = Mathf.InverseLerp(0.15f, 0.0f, self.Intensity);
+        //Debug.Log("RAIN " + self.Intensity + " - " + dampener);
+        float dampener = 0f;
+        self.ScreenShake *= dampener;
+        self.MicroScreenShake *= dampener;
     }
 
     int graphCounter = 40;
     private void BlizzardGraphics_DrawSprites(On.MoreSlugcats.BlizzardGraphics.orig_DrawSprites orig, MoreSlugcats.BlizzardGraphics self, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
     {
         orig(self, sLeaser, rCam, timeStacker, camPos);
-
         //if (graphCounter <= 0)
-        //{
         //    graphCounter = 40;
-        //}
-
         if (ModManager.CoopAvailable)
         {
             //sLeaser.sprites[0].isVisible = false;
@@ -477,15 +486,23 @@ public partial class CoopLeash : BaseUnityPlugin
         //IF WE ARE A DEFECTOR CALLING THE CAMERA FROM SOMEONE ELSE, SPOTLIGHT US RIGHT AWAY.
         if (self.GetCat().defector || UnTubedSlugsInRoom(self.room) <= 1 || groupFocusCount == 1) //IF WE ARE THE ONLY PLAYER IN THE ROOM (BUT NOT THE ONLY ONE STILL ALIVE) ALLOW SWITCH
         {
-			if (self.room == null || (self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature == self && Custom.rainWorld.options.cameraCycling))
+            if (self.room == null || (self.room?.game?.cameras[0]?.followAbstractCreature?.realizedCreature == self && Custom.rainWorld.options.cameraCycling))
 			{
 				cycleSwitch = true;
 				spotlightMode = false;
 			}
 			else
 			{
-				//IF WE'RE STEALING FROM THE MAIN GROUP, PUT A COOLDOWN ON US...
-				if (CLOptions.camPenalty.Value > 0 && !spotlightMode && self.room != null && self.room.game.AlivePlayers.Count > 2)
+                //FOR SPLITSCREEN, IF WE'RE THE FOCUS OF CAM2 WHEN WE CALL THE CAMERA, JUST COLLAPSE THE SECOND SCREEN.
+                if (splitScreenEnabled && self.room.game.cameras.Count() > 1 && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == self)
+                {
+                    self.GetCat().deniedSplitCam = !self.GetCat().deniedSplitCam; //TOGGLE THIS SETTING
+                    //Debug.Log("UN-SPLIT SCREEN");
+                    return;
+                }
+
+                //IF WE'RE STEALING FROM THE MAIN GROUP, PUT A COOLDOWN ON US...
+                if (CLOptions.camPenalty.Value > 0 && !spotlightMode && self.room != null && self.room.game.AlivePlayers.Count > 2)
 					self.GetCat().noCam = Math.Max(CLOptions.camPenalty.Value, 3) * 40;
                 if (groupFocusCount == 1) //IF THERE'S ONLY ONE PERSON TO HAND IT TO, DON'T PUT IT IN SPOTLIGHT MODE. HE DON'T NEED IT
                     spotlightMode = false;
@@ -580,33 +597,54 @@ public partial class CoopLeash : BaseUnityPlugin
         if (SmartCameraActive() && ModManager.CoopAvailable && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null && self.room.abstractRoom == self.followAbstractCreature.Room)
         {
             
-			if (splitScreenEnabled && self.cameraNumber > 0)
+			if (splitScreenEnabled)
 			{
-				//CHECK HOW MANY DEFECTORS WE HAVE.
-				int strike = self.cameraNumber - 1;
-				for (int i = 0; i < self.room.game.Players.Count; i++)
-				{
-					Player plr = self.room.game.Players[i].realizedCreature as Player;
-					if (plr != null && !plr.dead && !plr.inShortcut && plr.GetCat().defector)
-					{
-                        if (strike > 0)
-                            strike--;
-                        else
+                //FOR SPLITSCREEN, ALL NON-MAIN CAMERAS SHOULD ONLY FOCUS ON DEFECTORS
+                if (self.cameraNumber > 0)
+                {
+                    if (!(self.followAbstractCreature.realizedCreature as Player).GetCat().defector)
+                    {
+                        //CHECK HOW MANY DEFECTORS WE HAVE.
+                        int strike = self.cameraNumber - 1;
+                        for (int i = 0; i < self.room.game.Players.Count; i++)
+                        {
+                            Player plr = self.room.game.Players[i].realizedCreature as Player;
+                            if (plr != null && !plr.dead && !plr.inShortcut && plr.GetCat().defector)
+                            {
+                                if (strike > 0)
+                                    strike--;
+                                else
+                                {
+                                    //Debug.Log("CHANGING CAMERA TO PLAYER " + plr.ToString());
+                                    self.ChangeCameraToPlayer(plr.abstractCreature);
+                                    //SBCameraZoom(self, 0f, 0f); //SET OUR ZOOM TO 1
+                                }
+                            }
+                        }
+                    }
+                    //WE ALWAYS UPDATE ZOOM (BECAUSE WE NEED TO INHERIT CAM[0]'S ZOOM LEVEL)
+                    SBCameraZoom(self, 0f, 0f); //RUNNING THIS AS ANYTHING OTHER THAN MAIN CAM JUST SETS ZOOM LEVEL TO MAIN CAM'S LEVEL
+                    orig(self); //OKAY JUST RUN ORIG AND BE DONE
+                    return;
+                }
+
+                //MAKE SURE MAIN CAM IS NOT FOLLOWING A DEFECTOR, IF ABLE
+                if (self.cameraNumber == 0 && (self.followAbstractCreature.realizedCreature as Player).GetCat().defector)
+                {
+                    for (int i = 0; i < self.room.game.Players.Count; i++)
+                    {
+                        Player plr = self.room.game.Players[i].realizedCreature as Player;
+                        if (plr != null && !plr.dead && !plr.inShortcut && !plr.GetCat().defector)
                         {
                             self.ChangeCameraToPlayer(plr.abstractCreature);
-                            SBCameraZoom(self, 0f, 0f); //SET OUR ZOOM TO 1
-                            //plr.GetCat().splitCamFocused = true;
-                            //ALSO MAKE SURE MAIN CAM ISN'T FOCUSED ON US TOO
-                            //Player undefector = GetFirstUndefectedPlayer(self);
-                            //if (self.room.game.cameras[0].followAbstractCreature == plr.abstractCreature && undefector != null)
-                            //    self.room.game.cameras[0].ChangeCameraToPlayer(undefector.abstractCreature);
                         }
-					}
-				}
-				//OKAY JUST RUN ORIG AND BE DONE
-				orig(self);
-				return;
-			}
+                    }
+                }
+
+                //DO NOT ALLOW SPOTLIGHT MODE IF MULTIPLE SCREENS ARE ACTIVE, THAT'S MEAN (UNLESS ITS FOR A DEFECTOR)
+                if (self.cameraNumber == 0 && !(self.followAbstractCreature.realizedCreature as Player).GetCat().defector && MultiScreens())
+                    spotlightMode = false;
+            }
 			
 			
 			
@@ -787,7 +825,12 @@ public partial class CoopLeash : BaseUnityPlugin
                 {
                     mostBehindPlayer.GetCat().defector = true;
                     if (!spotlightMode) //DON'T APPLY THIS IN SPOTLIGHT MODE OR IT WOULD APPLY TO PLAYERS WHO TAKE SPOTLIGHT AND WALK AWAY
+                    {
                         mostBehindPlayer.GetCat().forcedDefect = true;
+                        if (!CLOptions.autoSplitScreen.Value)
+                            mostBehindPlayer.GetCat().deniedSplitCam = true; //AUTO DENY THE SPLIT CAM. THEY CAN CALL CAM IF THEY REALLY NEED IT
+                    }
+                        
                     if (mostBehindPlayer.abstractCreature == self.followAbstractCreature)
                     {
                         if (self.hud?.jollyMeter != null)
@@ -873,13 +916,14 @@ public partial class CoopLeash : BaseUnityPlugin
     {
         //if (MultiScreens())
         //    return; //NOT COMPATIBLE WITH THE ZOOM FEATURE ATM, UNFORTUNATELY...
-        return; //JUST FOR NOW....
+        if (!zoomEnabled)
+            return; //JUST FOR NOW....
         
         float xLimit = 1100 * ScreenSizeMod().x; //DON'T PUT THE CAMERA MODIFIER ON THIS ONE
         float yLimit = 600 * ScreenSizeMod().y;
         float baseZoom = baseCameraZoom;  //WE GET THIS FROM SBCAM REMIX SLIDER, IF IT'S ENABLED ON STARTUP. OTHERWISE IT'S JUST 1
         float zoomMod = 1f + Mathf.Max((xExtra - xLimit) / xLimit, (yExtra - yLimit) / yLimit, 0f);
-        float zoomLimit = CLOptions.zoomLimit.Value;
+        float zoomLimit = 1f - CLOptions.zoomLimit.Value;
         zoomMod = Mathf.Max(baseZoom * (1f / zoomMod), zoomLimit);
 
         if (self.cameraNumber == 0)
@@ -948,17 +992,17 @@ public partial class CoopLeash : BaseUnityPlugin
     //RESET OUR CAMERA ZOOM OUT TO MAX, TO CATCH PLAYERS IN RANGE OF THE GROUP CAMERA AS WE SWITCH AWAY FROM SPOTLIGHT MODE
     public static void ResetZoom()
     {
-        //if (MultiScreens())
-        //    return; //NOT COMPATIBLE WITH THE ZOOM FEATURE ATM, UNFORTUNATELY...
+        if (MultiScreens() || !zoomEnabled)
+            return; //NOT COMPATIBLE WITH THE ZOOM FEATURE ATM, UNFORTUNATELY...
 
-        internalCamZoom = 1f;
+        internalCamZoom = 1f - CLOptions.zoomLimit.Value;
         if (camScrollEnabled)
             SBResetZoom();
     }
 
     public static void SBResetZoom()
     {
-        SBCameraScroll.RoomCameraMod.camera_zoom = CLOptions.zoomLimit.Value;
+        SBCameraScroll.RoomCameraMod.camera_zoom = 1f - CLOptions.zoomLimit.Value;
     }
 
 
@@ -995,8 +1039,8 @@ public partial class CoopLeash : BaseUnityPlugin
     }
 	
 	public static bool SplitByRoom = false;
-	
-	public void SplitscreenUpdate(RainWorldGame self)
+
+    public void SplitscreenUpdate(RainWorldGame self)
     {
         if (!self.IsStorySession) return;
         if (self.GamePaused) return;
@@ -1008,7 +1052,7 @@ public partial class CoopLeash : BaseUnityPlugin
             for (int i = 0; i < self.Players.Count; i++)
             {
                 Player plr = self.Players[i].realizedCreature as Player;
-                if (plr != null && !plr.dead && !plr.inShortcut)
+                if (plr != null && !plr.dead && !plr.inShortcut && !plr.GetCat().deniedSplitCam)
                 {
                     //DO WE CHECK BY DISTANCE OR BY ROOM?
 					if (!SplitByRoom || self.Players.Count <= 2) //IF THERE'S ONLY 2 OF US, NO REASON TO NOT USE DISTANCE
@@ -1042,6 +1086,11 @@ public partial class CoopLeash : BaseUnityPlugin
                 UnityEngine.Object.FindObjectOfType<SplitScreenCoop.SplitScreenCoop>().SetSplitMode(SplitMode.NoSplit, self);
             }
         }
+    }
+
+    public void UnSplitScreen(RainWorldGame self)
+    {
+        UnityEngine.Object.FindObjectOfType<SplitScreenCoop.SplitScreenCoop>().SetSplitMode(SplitMode.NoSplit, self);
     }
 
 
@@ -1381,9 +1430,14 @@ public partial class CoopLeash : BaseUnityPlugin
                                 self.transportVessels[num].wait = 0;
                                 forceDepart = true;
                                 //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
-                                realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
-                                //myPlayer.GetCat().defector = true; //MAYBE WE DON'T NEED TO DO THIS?...
-                                spotlightMode = true;
+                                if (splitScreenEnabled && realizedRoom.game.cameras.Length > 1)
+                                    realizedRoom.game.cameras[1].ChangeCameraToPlayer(myPlayer.abstractCreature);
+                                else if (!splitScreenEnabled) //DON'T FOCUS US IF SPLITSCREEN IS ON. THE 2ND CAM WILL AUTO TARGET US
+                                {
+                                    realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
+                                    //myPlayer.GetCat().defector = true; //MAYBE WE DON'T NEED TO DO THIS?...
+                                    spotlightMode = true;
+                                }
                                 //WIPE THE BEACON IF WE WERE THE ONLY ONE WAITING
                                 if (TubedSlugs(realizedRoom) == 1)
                                     WipeBeacon("ShortcutHandler_Update");
@@ -1509,6 +1563,7 @@ public partial class CoopLeash : BaseUnityPlugin
             player.GetCat().pipeType = "untubed";
 			player.GetCat().lastRoom = newRoom.roomSettings.name;
             player.GetCat().leavingStation = 0;
+            player.GetCat().deniedSplitCam = false;
         }
     }
 
@@ -1683,7 +1738,8 @@ public static class PipeStatusClass
 		public int noCam;
         public int camProtection;
         public bool splitCamFocused; //IF SPLITSCREEN HAS AN EXTRA CAM FOCUSED ON US
-		public Vector2 bodyPosMemory; //REMEMBER WHERE THIS PLAYER WAS BEFORE WE TELEPORT THEM FOR CAMERASCROLL
+        public bool deniedSplitCam;
+        public Vector2 bodyPosMemory; //REMEMBER WHERE THIS PLAYER WAS BEFORE WE TELEPORT THEM FOR CAMERASCROLL
 
         public PipeStatus()
         {
