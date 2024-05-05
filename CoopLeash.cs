@@ -100,6 +100,8 @@ public partial class CoopLeash : BaseUnityPlugin
     public static float internalCamZoom = 1f;
     public static float baseCameraZoom = 1f;
     public static bool zoomEnabled = true;
+	public static float targetCamZoom = 1f;
+	public static float lastCamZoom = 1f;
 
     private void OnEnable()
     {
@@ -490,14 +492,13 @@ public partial class CoopLeash : BaseUnityPlugin
 			{
 				cycleSwitch = true;
 				spotlightMode = false;
-			}
+            }
 			else
 			{
                 //FOR SPLITSCREEN, IF WE'RE THE FOCUS OF CAM2 WHEN WE CALL THE CAMERA, JUST COLLAPSE THE SECOND SCREEN.
                 if (splitScreenEnabled && self.room.game.cameras.Count() > 1 && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == self)
                 {
                     self.GetCat().deniedSplitCam = !self.GetCat().deniedSplitCam; //TOGGLE THIS SETTING
-                    //Debug.Log("UN-SPLIT SCREEN");
                     return;
                 }
 
@@ -520,8 +521,8 @@ public partial class CoopLeash : BaseUnityPlugin
         orig(self);
         Custom.rainWorld.options.cameraCycling = origCycle;
 
-        if (camScrollEnabled && !spotlightMode)
-            ResetZoom();
+        //if (camScrollEnabled && !spotlightMode) //&& MultiScreens()
+        //    ResetZoom();
     }
 
     private void Player_ctor(On.Player.orig_ctor orig, Player self, AbstractCreature abstractCreature, World world)
@@ -580,6 +581,8 @@ public partial class CoopLeash : BaseUnityPlugin
 	int tickClock = tickMax;
     public static Vector2 lastCamPos = new Vector2(0, 0);
     float turple = 1f;
+    float xDistanceMemory = 0f;
+    float yDistanceMemory = 0f;
 
 
     bool spotlightMode = false;
@@ -673,9 +676,14 @@ public partial class CoopLeash : BaseUnityPlugin
 				if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room)
 				{
 					//IF WE'RE A DEFECTOR, CHECK TO SEE IF WE CAN REJOIN THE GROUP REAL QUICK
-					if (plr.GetCat().defector && plr.GetCat().pipeType != "other") //DON'T TRACK IN SHORTCUTS, SINCE IT SEEMS THE GAME WILL CHECK YOUR POSITION FROM THE PREVIOUS ROOM. SNEAKY LITTLE SHITE...
+					if (plr.GetCat().defector && plr.GetCat().justDefected <= 0 && plr.GetCat().pipeType != "other") //DON'T TRACK IN SHORTCUTS, SINCE IT SEEMS THE GAME WILL CHECK YOUR POSITION FROM THE PREVIOUS ROOM. SNEAKY LITTLE SHITE...
 					{
-						if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650 && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325) //self.lastPos
+                        //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325)
+                        //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f * 2f * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325 * 2f * (1f / GetWidestCameraZoom())) //self.lastPos
+                        //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f * 2f * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325 * 2f * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y)
+                        //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 1300 && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 700) //I GIVE UP... THIS IS THE BEST I CAN DO
+                        //OKAY IT'S NOT PERFECT, I THINK SOME OF THESE VALUES NEED TO BE MULTIPLIED BY THE GETWIDESTCAMERAZOOM MODIFIER AS WELL, BUT IT'S WAAAY BETTER THAN IT USED TO BE
+                        if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < (1250f - (xDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < (675f - (yDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()))
                         {
                             plr.GetCat().defector = false;
                             //IF WE HAD BEEN FORCED OUT OF OUR GROUP, WE CAN AUTO-REJOIN OUT OF SPOTLIGHT MODE
@@ -685,8 +693,13 @@ public partial class CoopLeash : BaseUnityPlugin
                                 plr.GetCat().forcedDefect = false;
                                 plr.GetCat().camProtection = 40;
                             }
-                            //Debug.Log("UNDEFECT " + plr);
-                        }  
+                            
+                            //IF THE OFF-CAMERA FROM SPLITSCREEN WAS FOCUSED ON US, UN-SPLIT THE CAMERAS. YES WE NEED TO DO THIS RIGHT NOW OTHERWISE IT WILL MESS UP THE DEFECTOR CALCULATIONS BELOW
+                            if (splitScreenEnabled && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == plr)
+                            {
+                                SplitscreenUpdate(self.room?.game);
+                            }
+                        }
 					}
 
                     //SKIP THIS CHECK IF WE ARE TRANSITIONING BETWEEN ROOMS. OUR UPDATES ARE STILL FROM THE PREVIOUS ROOM
@@ -699,7 +712,7 @@ public partial class CoopLeash : BaseUnityPlugin
 						if (plrPos.x > maxRight)
 							maxRight = plrPos.x;
 						if (plrPos.y < maxDown)
-							maxDown = plrPos.y;
+							maxDown = Mathf.Max(plrPos.y, 0); //DON'T PAN INTO DEATH PITS
 						if (plrPos.y > maxUp)
 							maxUp = plrPos.y;
 								
@@ -758,16 +771,6 @@ public partial class CoopLeash : BaseUnityPlugin
                             swapFollower ??= plr.abstractCreature; //LITERALLY JUST ANYONE. THE GAME CAN SORT IT OUT NEXT TICK IF THAT'S A PROBLEM
                     }
                 }
-                
-                //Debug.Log("RUNNING THE THING " + maxLeft + " - " + maxRight + " - " + maxUp + " - " + maxDown + " - ");
-
-                //CHECK FOR DEFECTORS, PLAYERS WHO HAVE STRAYED TOO FAR FROM THE GROUP AVERAGE IN EITHER THE X OR Y AXIS
-                float avgX = totalX / totalCnt;
-                float avgY = totalY / totalCnt;
-                Player mostBehindPlayer = null;
-                float mostBehind = 0;
-                float xLimit = 1300 * (1f / GetCameraZoom()) * ScreenSizeMod().x;
-                float yLimit = 700 * (1f / GetCameraZoom()) * ScreenSizeMod().y;
 
                 if (SmartCameraActive()) //camScrollEnabled
                 {
@@ -776,10 +779,18 @@ public partial class CoopLeash : BaseUnityPlugin
                     else
                         SBCameraZoom(self, Mathf.Abs(maxLeft - maxRight), Mathf.Abs(maxUp - maxDown));
                 }
-                else
-                {
-                    //DONOTHING
-                }
+
+                //Debug.Log("RUNNING THE THING " + maxLeft + " - " + maxRight + " - " + maxUp + " - " + maxDown + " - ");
+
+                //CHECK FOR DEFECTORS, PLAYERS WHO HAVE STRAYED TOO FAR FROM THE GROUP AVERAGE IN EITHER THE X OR Y AXIS
+                float avgX = totalX / totalCnt;
+                float avgY = totalY / totalCnt;
+                Player mostBehindPlayer = null;
+                float mostBehind = 0;
+                float xLimit = 1300 * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x; //GetWidestCameraZoom
+                float yLimit = 700 * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y;
+                xDistanceMemory = Mathf.Abs(maxLeft - maxRight);
+                yDistanceMemory = Mathf.Abs(maxUp - maxDown);
 
                 //X LIMIT
                 if (Mathf.Abs(maxLeft - maxRight) > xLimit)
@@ -824,6 +835,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (mostBehindPlayer != null)
                 {
                     mostBehindPlayer.GetCat().defector = true;
+                    mostBehindPlayer.GetCat().justDefected = 20;
                     if (!spotlightMode) //DON'T APPLY THIS IN SPOTLIGHT MODE OR IT WOULD APPLY TO PLAYERS WHO TAKE SPOTLIGHT AND WALK AWAY
                     {
                         mostBehindPlayer.GetCat().forcedDefect = true;
@@ -932,17 +944,21 @@ public partial class CoopLeash : BaseUnityPlugin
             zoomMod = zoomMemory;
         //Debug.Log("ZOOM: " + zoomMod + " - " + xExtra + " - " + self.cameraNumber);
 
-        if (camScrollEnabled)
+        if (camScrollEnabled && self.cameraNumber == 0)
             SBCameraApply(zoomMod);
         
-        ApplyCameraZoom(self, zoomMod);
+        ApplyCameraZoom(self, GetCameraZoom()); //zoomMod
     }
 
     public static void SBCameraApply(float zoomMod)
     {
         if (SBCameraScroll.RoomCameraMod.camera_zoom != zoomMod)
         {
-            SBCameraScroll.RoomCameraMod.camera_zoom = zoomMod;
+            // SBCameraScroll.RoomCameraMod.camera_zoom = zoomMod;
+            
+            lastCamZoom = SBCameraScroll.RoomCameraMod.camera_zoom;
+            targetCamZoom = zoomMod;
+            SBCameraScroll.RoomCameraMod.camera_zoom = Mathf.Lerp(lastCamZoom, targetCamZoom, 0.10f);
             //SBCameraScroll.RoomCameraMod.Apply_Camera_Zoom(self); //THIS DOESN'T RUN IF CAMERA ZOOM == 1
         }
     }
@@ -977,6 +993,14 @@ public partial class CoopLeash : BaseUnityPlugin
             return GetSBCameraZoom();
         else if (splitScreenEnabled)
             return internalCamZoom;
+        else
+            return 1f;
+    }
+
+    public static float GetWidestCameraZoom()
+    {
+        if (camScrollEnabled && CLOptions.smartCam.Value)
+            return 1f - CLOptions.zoomLimit.Value;
         else
             return 1f;
     }
@@ -1052,10 +1076,10 @@ public partial class CoopLeash : BaseUnityPlugin
             for (int i = 0; i < self.Players.Count; i++)
             {
                 Player plr = self.Players[i].realizedCreature as Player;
-                if (plr != null && !plr.dead && !plr.inShortcut && !plr.GetCat().deniedSplitCam)
+                if (plr != null && !plr.dead && !plr.GetCat().deniedSplitCam && plr.GetCat().pipeType != "other") //!plr.inShortcut && 
                 {
                     //DO WE CHECK BY DISTANCE OR BY ROOM?
-					if (!SplitByRoom || self.Players.Count <= 2) //IF THERE'S ONLY 2 OF US, NO REASON TO NOT USE DISTANCE
+					if (CLOptions.autoSplitScreen.Value || self.Players.Count <= 2) //IF THERE'S ONLY 2 OF US, NO REASON TO NOT USE DISTANCE
 					{
                         if (plr.GetCat().defector)
                         {
@@ -1064,7 +1088,7 @@ public partial class CoopLeash : BaseUnityPlugin
                         }
 					}
                     //TRICK QUESTION, WE ALWAYS CHECK BY ROOM (AND SOMETIMES BY DISTANCE TOO)
-                    if (plr.room != self.cameras[0].room)
+                    if (plr.room != self.cameras[0].room && plr.room != null) //IS MY ROOM NULL WHILE IN A SHORTCUT???
                     {
                         splitGroup = true;
                         break;
@@ -1285,6 +1309,9 @@ public partial class CoopLeash : BaseUnityPlugin
 
         if (self.GetCat().camProtection > 0)
             self.GetCat().camProtection--;
+
+        if (self.GetCat().justDefected > 0)
+            self.GetCat().justDefected--;
 
         if (self.room != null && ValidPlayer(self)) {
             
@@ -1739,6 +1766,7 @@ public static class PipeStatusClass
         public int camProtection;
         public bool splitCamFocused; //IF SPLITSCREEN HAS AN EXTRA CAM FOCUSED ON US
         public bool deniedSplitCam;
+        public int justDefected; //GIVE THE CAMERA A FEW TICKS TO MOVE OUT OF RANGE OF THE NEWLY ADDED DEFECTOR SO THEY DON'T GET ADDED BACK IN ON THE SAME TICK
         public Vector2 bodyPosMemory; //REMEMBER WHERE THIS PLAYER WAS BEFORE WE TELEPORT THEM FOR CAMERASCROLL
 
         public PipeStatus()
