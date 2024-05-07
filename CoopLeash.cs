@@ -221,12 +221,12 @@ public partial class CoopLeash : BaseUnityPlugin
     private void GlobalRain_Update(On.GlobalRain.orig_Update orig, GlobalRain self)
     {
         orig(self);
-        //if (self.progression == 1f)
-        //float dampener = Mathf.InverseLerp(0.15f, 0.0f, self.Intensity);
-        //Debug.Log("RAIN " + self.Intensity + " - " + dampener);
-        float dampener = 0f;
-        self.ScreenShake *= dampener;
-        self.MicroScreenShake *= dampener;
+        if (ModManager.CoopAvailable && CLOptions.latencyMode.Value)
+        {
+            float dampener = 0f;
+            self.ScreenShake *= dampener;
+            self.MicroScreenShake *= dampener;
+        }
     }
 
     int graphCounter = 40;
@@ -235,7 +235,7 @@ public partial class CoopLeash : BaseUnityPlugin
         orig(self, sLeaser, rCam, timeStacker, camPos);
         //if (graphCounter <= 0)
         //    graphCounter = 40;
-        if (ModManager.CoopAvailable)
+        if (ModManager.CoopAvailable && CLOptions.latencyMode.Value)
         {
             //sLeaser.sprites[0].isVisible = false;
             sLeaser.sprites[1].isVisible = false;
