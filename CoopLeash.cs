@@ -937,6 +937,10 @@ public partial class CoopLeash : BaseUnityPlugin
         float zoomMod = 1f + Mathf.Max((xExtra - xLimit) / xLimit, (yExtra - yLimit) / yLimit, 0f);
         float zoomLimit = 1f - CLOptions.zoomLimit.Value;
         zoomMod = Mathf.Max(baseZoom * (1f / zoomMod), zoomLimit);
+		
+		//DON'T ZOOM IN SINGLE SCREEN ROOMS, EL BOZO
+		if (self.room.cameraPositions.Length <= 1)
+			zoomMod = 1f;
 
         if (self.cameraNumber == 0)
             zoomMemory = zoomMod;
