@@ -445,8 +445,8 @@ public partial class CoopLeash : BaseUnityPlugin
             self.label.text = self.playerName;
 
         //FOR TESTING
-        //if (myPlayer != null && myPlayer.GetCat().defector)
-        //    self.label.text = "(D)" + self.label.text;
+        if (myPlayer != null && myPlayer.GetCat().defector)
+            self.label.text = "(D)" + self.label.text;
 
         self.size.x = self.label.text.Length;
     }
@@ -575,7 +575,20 @@ public partial class CoopLeash : BaseUnityPlugin
         return null;
     }
 
-    
+    public static Player GetFirstDefectedPlayer(RoomCamera self)
+    {
+        for (int i = 0; i < self.game.Players.Count; i++)
+        {
+            Player plr = self.game.Players[i].realizedCreature as Player;
+            if (plr != null && !plr.dead && plr.GetCat().defector) //WE CAN INCLUDE PLAYERS IN SHORTCUTS HERE
+            {
+                return plr;
+            }
+        }
+        return null;
+    }
+
+
 
     public const int tickMax = 20;
 	int tickClock = tickMax;
@@ -1113,6 +1126,14 @@ public partial class CoopLeash : BaseUnityPlugin
                 //(Chainloader.PluginInfos["com.henpemaz.splitscreencoop"].Instance as SplitScreenCoop.SplitScreenCoop).SetSplitMode(SplitMode.NoSplit, self);
                 UnityEngine.Object.FindObjectOfType<SplitScreenCoop.SplitScreenCoop>().SetSplitMode(SplitMode.NoSplit, self);
             }
+
+            //OK WE NEED TO VERIFY THAT WHEN SOMEONE ELSE IS IN ANOTHER ROOM, THE TWO CAMERAS AREN'T FOCUSED ON UN-DEFECTED PEOPLE IN THE SAME ROOM
+            if (splitGroup && self.cameras[1]?.followAbstractCreature?.realizedCreature is Player offcamPlr && !offcamPlr.GetCat().defector)
+            {
+                Player firstDefector = GetFirstDefectedPlayer(self.cameras[1]);
+                if (firstDefector != null)
+                    self.cameras[1].ChangeCameraToPlayer(firstDefector.abstractCreature);
+            }
         }
     }
 
@@ -1462,7 +1483,10 @@ public partial class CoopLeash : BaseUnityPlugin
                                 forceDepart = true;
                                 //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
                                 if (splitScreenEnabled && realizedRoom.game.cameras.Length > 1)
+                                {
                                     realizedRoom.game.cameras[1].ChangeCameraToPlayer(myPlayer.abstractCreature);
+                                    myPlayer.GetCat().defector = true; //WHY WOULD WE NOT DEFECT??
+                                }
                                 else if (!splitScreenEnabled) //DON'T FOCUS US IF SPLITSCREEN IS ON. THE 2ND CAM WILL AUTO TARGET US
                                 {
                                     realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
@@ -1595,6 +1619,9 @@ public partial class CoopLeash : BaseUnityPlugin
 			player.GetCat().lastRoom = newRoom.roomSettings.name;
             player.GetCat().leavingStation = 0;
             player.GetCat().deniedSplitCam = false;
+            //IF A SHORTCUT BEACON EXISTS AND WE ARE NOT IN THE SAME ROOM, WE SHOULD BE A DEFECTOR
+            if (splitScreenEnabled && beaconRoom != null && beaconRoom != newRoom)
+                player.GetCat().defector = true;
         }
     }
 
