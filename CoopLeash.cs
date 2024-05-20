@@ -498,8 +498,17 @@ public partial class CoopLeash : BaseUnityPlugin
                 //FOR SPLITSCREEN, IF WE'RE THE FOCUS OF CAM2 WHEN WE CALL THE CAMERA, JUST COLLAPSE THE SECOND SCREEN.
                 if (splitScreenEnabled && self.room.game.cameras.Count() > 1 && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == self)
                 {
-                    self.GetCat().deniedSplitCam = !self.GetCat().deniedSplitCam; //TOGGLE THIS SETTING
-                    return;
+                    // self.GetCat().deniedSplitCam = !self.GetCat().deniedSplitCam; //TOGGLE THIS SETTING - NO THIS ISN''T ENOUGH!
+                    //TOGGLE THIS SETTING FOR EVERYONE IN THE ROOM
+                    bool toggleTo = !self.GetCat().deniedSplitCam;
+                    for (int i = 0; i < self.room.game.Players.Count; i++)
+                    {
+                        Player plr = self.room.game.Players[i].realizedCreature as Player;
+                        if (plr != null && !plr.dead && plr.GetCat().defector && plr.room == self.room?.game?.cameras[1].room)
+                        {
+                            plr.GetCat().deniedSplitCam = toggleTo;
+                        }
+                    }
                 }
 
                 //IF WE'RE STEALING FROM THE MAIN GROUP, PUT A COOLDOWN ON US...
@@ -644,8 +653,8 @@ public partial class CoopLeash : BaseUnityPlugin
                     return;
                 }
 
-                //MAKE SURE MAIN CAM IS NOT FOLLOWING A DEFECTOR, IF ABLE
-                if (self.cameraNumber == 0 && (self.followAbstractCreature.realizedCreature as Player).GetCat().defector)
+                //MAKE SURE MAIN CAM IS NOT FOLLOWING A DEFECTOR (OR DEAD PLAYER), IF ABLE
+                if (self.cameraNumber == 0 && ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector || (self.followAbstractCreature.realizedCreature as Player).dead))
                 {
                     for (int i = 0; i < self.room.game.Players.Count; i++)
                     {
@@ -1089,6 +1098,8 @@ public partial class CoopLeash : BaseUnityPlugin
         if (true) //self.cameras.Length > 1)
         {
             bool splitGroup = false;
+            bool unsheltered = false;
+            bool shelteredUndefected = false;
             //CHECK HOW MANY DEFECTORS WE HAVE.
             for (int i = 0; i < self.Players.Count; i++)
             {
@@ -1101,15 +1112,24 @@ public partial class CoopLeash : BaseUnityPlugin
                         if (plr.GetCat().defector)
                         {
                             splitGroup = true;
-                            break;
+                            //break;
                         }
 					}
                     //TRICK QUESTION, WE ALWAYS CHECK BY ROOM (AND SOMETIMES BY DISTANCE TOO)
                     if (plr.room != self.cameras[0].room && plr.room != null) //IS MY ROOM NULL WHILE IN A SHORTCUT???
                     {
                         splitGroup = true;
-                        break;
+                        //break;
                     }
+                    //SHELTER SWAP
+                    if (plr.room != null)
+                    {
+                        if (plr.room.shelterDoor == null)
+                            unsheltered = true; //AT LEAST ONE PERSON IS RUNNING AROUND OUTSIDE
+                        else if (plr.room.shelterDoor != null && !plr.GetCat().defector && !plr.stillInStartShelter)
+                            shelteredUndefected = true;
+                    }
+                    
                 }
             }
 
@@ -1134,6 +1154,28 @@ public partial class CoopLeash : BaseUnityPlugin
                 if (firstDefector != null)
                     self.cameras[1].ChangeCameraToPlayer(firstDefector.abstractCreature);
             }
+
+            //SWAP DEFECTOR STATUS IF WE ARE IN A SHELTER WHILE SOMEONE ELSE ISN'T!!
+
+            //IF AT LEAST ONE PERSON IS UNSHELTERED, MAKE THEM NON-DEFECTORS WHILE THE PLAYERS IN SHELTER ARE DEFECTORS
+            if (unsheltered && shelteredUndefected)
+            {
+                Debug.Log("SWAP DEFECTOR STATUS FOR SHELTERED PLAYERS");
+                for (int i = 0; i < self.Players.Count; i++)
+                {
+                    Player plr = self.Players[i].realizedCreature as Player;
+                    if (plr != null && !plr.dead)
+                    {
+                        if (plr.room.shelterDoor == null)
+                            plr.GetCat().defector = false;
+                        else
+                            plr.GetCat().defector = true;
+                        //plr.GetCat().defector
+                    }
+                }
+            }
+
+            //OK MAKE SURE NOT EVERYONE IN THE WORLD IS A DEFECTOR
         }
     }
 
@@ -1595,12 +1637,18 @@ public partial class CoopLeash : BaseUnityPlugin
             }
 
             //DOUBLE CHECK IF WE'RE EVEN ALLOWED TO ENTER THIS PIPE!
-            if (CLOptions.allowSplitUp.Value == false && beaconRoom == self.room && shortCutBeacon != entrancePos && player.GetCat().pipeType != "normal")
+            if (beaconRoom == self.room && shortCutBeacon != entrancePos && player.GetCat().pipeType != "normal")
             {
-                self.shortcutDelay = 20;
-                self.enteringShortCut = null;
-                (self as Player).PlayHUDSound(SoundID.MENU_Error_Ping);
-                return;//JUST CUT IT OUT! DON'T EVEN ENTER THE PIPE
+                if (CLOptions.allowSplitUp.Value == false)
+                {
+                    self.shortcutDelay = 20;
+                    self.enteringShortCut = null;
+                    (self as Player).PlayHUDSound(SoundID.MENU_Error_Ping);
+                    return;//JUST CUT IT OUT! DON'T EVEN ENTER THE PIPE
+                }
+                //THIS ISN'T THE WARP BEACON PIPE, SO IT SHOULD DEFECT US!
+                player.GetCat().defector = true;
+                player.GetCat().departedFromAltExit = true;
             }
         }
         orig(self, entrancePos, carriedByOther);
@@ -1619,9 +1667,10 @@ public partial class CoopLeash : BaseUnityPlugin
 			player.GetCat().lastRoom = newRoom.roomSettings.name;
             player.GetCat().leavingStation = 0;
             player.GetCat().deniedSplitCam = false;
-            //IF A SHORTCUT BEACON EXISTS AND WE ARE NOT IN THE SAME ROOM, WE SHOULD BE A DEFECTOR
-            if (splitScreenEnabled && beaconRoom != null && beaconRoom != newRoom)
-                player.GetCat().defector = true;
+            player.GetCat().departedFromAltExit = false;
+            //IF A SHORTCUT BEACON EXISTS AND WE ARE NOT IN THE SAME ROOM, WE SHOULD BE A DEFECTOR. OR IF WE ARE IN THE JAWS OF A CREATURE
+            if (player.dangerGrasp != null) //(splitScreenEnabled && beaconRoom != null && beaconRoom != newRoom) //WE HANDLE THIS ELSEWHERE NOW, HOPEFULLY
+                player.GetCat().defector = true; 
         }
     }
 
@@ -1697,7 +1746,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 //BUT FIRST, TURNN OFF ALL THE WAIT TIMERS
                 int waitDelay = 6 + (self.transportVessels.Count * 4);
                 for (int num = self.transportVessels.Count - 1; num >= 0; num--) {
-                    if (ModManager.CoopAvailable && self.transportVessels[num].creature is Player sluggo && !sluggo.isNPC && sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name) { //sluggo.room == beaconRoom
+                    if (ModManager.CoopAvailable && self.transportVessels[num].creature is Player sluggo && !sluggo.isNPC && sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name && !sluggo.GetCat().departedFromAltExit) { //sluggo.room == beaconRoom
                         self.transportVessels[num].wait = waitDelay;
                         //MAKE THE FIRST SLUGCAT THE CAMERA OWNER -OKAY WHY DOES THIS NOT WORK???
                         //if (waitDelay == 10)
@@ -1798,6 +1847,7 @@ public static class PipeStatusClass
         public bool splitCamFocused; //IF SPLITSCREEN HAS AN EXTRA CAM FOCUSED ON US
         public bool deniedSplitCam;
         public int justDefected; //GIVE THE CAMERA A FEW TICKS TO MOVE OUT OF RANGE OF THE NEWLY ADDED DEFECTOR SO THEY DON'T GET ADDED BACK IN ON THE SAME TICK
+        public bool departedFromAltExit; //TO HANDLE AN EXCEPTION WHERE EVERY OTHER PLAYER WAS WAITING IN THE WARP PIPE AND THE LAST PLAYER ENTERS A DIFFERENT PIPE
         public Vector2 bodyPosMemory; //REMEMBER WHERE THIS PLAYER WAS BEFORE WE TELEPORT THEM FOR CAMERASCROLL
 
         public PipeStatus()
