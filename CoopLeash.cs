@@ -188,6 +188,7 @@ public partial class CoopLeash : BaseUnityPlugin
             On.Player.TriggerCameraSwitch += Player_TriggerCameraSwitch;
             On.Player.TerrainImpact += Player_TerrainImpact;
             On.Player.Collide += Player_Collide;
+            On.Player.Die += Player_Die;
             On.RoomCamera.Update += RoomCamera_Update;
             On.ShortcutHandler.Update += ShortcutHandler_Update;
             On.Menu.ControlMap.ctor += ControlMap_ctor;
@@ -784,12 +785,12 @@ public partial class CoopLeash : BaseUnityPlugin
             {
 
                 //IF WE'RE FOCUSED ON SOMEONE IN A PIPE, QUICKLY SWITCH IT TO THE FIRST AVAILABLE NON-PIPE PLAUER
-                if ((self.followAbstractCreature.realizedCreature as Player).inShortcut || (self.followAbstractCreature.realizedCreature as Player).GetCat().splitCamFocused)
+                if ((self.followAbstractCreature.realizedCreature as Player).inShortcut)
                 {
                     for (int i = 0; i < self.room.game.Players.Count; i++)
                     {
                         Player plr = self.room.game.Players[i].realizedCreature as Player;
-                        if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut && !plr.GetCat().splitCamFocused)
+                        if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut)
                             swapFollower ??= plr.abstractCreature; //LITERALLY JUST ANYONE. THE GAME CAN SORT IT OUT NEXT TICK IF THAT'S A PROBLEM
                     }
                 }
@@ -1094,7 +1095,7 @@ public partial class CoopLeash : BaseUnityPlugin
     {
         if (!self.IsStorySession) return;
         if (self.GamePaused) return;
-
+         
         if (true) //self.cameras.Length > 1)
         {
             bool splitGroup = false;
@@ -1483,6 +1484,43 @@ public partial class CoopLeash : BaseUnityPlugin
         }
     }
 
+    //WHEN SOMEONE DIES, DOUBLE CHECK THAT THE OTHER PLAYERS AREN'T LOCKED AS DEFECTORS
+    private void Player_Die(On.Player.orig_Die orig, Player self)
+    {
+        self.GetCat().deniedSplitCam = true;
+        self.GetCat().defector = true;
+        RainWorldGame myGame = self.room.game;
+
+        orig(self);
+
+        int aliveCount = 0;
+        for (int i = 0; i < myGame.Players.Count; i++)
+        {
+            Player plr = myGame.Players[i].realizedCreature as Player;
+            if (plr != null && !plr.dead)
+            {
+                aliveCount++;
+            }
+        }
+
+        //IF ONLY ONE PERSON IS LEFT ALIVE, 
+        if (aliveCount == 1)
+        {
+            for (int i = 0; i < myGame.Players.Count; i++)
+            {
+                Player plr = myGame.Players[i].realizedCreature as Player;
+                if (plr != null && !plr.dead)
+                {
+                    plr.GetCat().defector = false;
+                }
+                else
+                {
+                    plr.GetCat().defector = true;
+                }
+            }
+        }
+    }
+
 
     private void ShortcutHandler_Update(On.ShortcutHandler.orig_Update orig, ShortcutHandler self) {
 
@@ -1844,7 +1882,6 @@ public static class PipeStatusClass
 		public int forceDepart;
 		public int noCam;
         public int camProtection;
-        public bool splitCamFocused; //IF SPLITSCREEN HAS AN EXTRA CAM FOCUSED ON US
         public bool deniedSplitCam;
         public int justDefected; //GIVE THE CAMERA A FEW TICKS TO MOVE OUT OF RANGE OF THE NEWLY ADDED DEFECTOR SO THEY DON'T GET ADDED BACK IN ON THE SAME TICK
         public bool departedFromAltExit; //TO HANDLE AN EXCEPTION WHERE EVERY OTHER PLAYER WAS WAITING IN THE WARP PIPE AND THE LAST PLAYER ENTERS A DIFFERENT PIPE
