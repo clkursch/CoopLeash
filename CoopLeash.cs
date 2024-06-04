@@ -102,6 +102,7 @@ public partial class CoopLeash : BaseUnityPlugin
     public static bool zoomEnabled = true;
 	public static float targetCamZoom = 1f;
 	public static float lastCamZoom = 1f;
+	public static bool cleanupDefectorFlag = false;
 
     private void OnEnable()
     {
@@ -115,16 +116,17 @@ public partial class CoopLeash : BaseUnityPlugin
         //I BARELY UNDERSTAND HOW THIS WORKS BUT SHUAMBUAM SEEMS TO HAVE IT ON LOCK SO I'LL JUST FOLLOW HIS LEAD
         if (is_post_mod_init_initialized) return;
             is_post_mod_init_initialized = true;
-
         
         if (camScrollEnabled)
         {
             CamScrollHooks();
         }
-        
 
         if (improvedInputEnabled)
             Initialize_Custom_Input();
+		
+		//if (splitScreenEnabled) //NOPE, NOT LATE ENOUGH
+		//	SplitScreenHooks();
     }
 
     public static void CamScrollHooks()
@@ -143,6 +145,23 @@ public partial class CoopLeash : BaseUnityPlugin
         RWInputMod.Initialize_Custom_Keybindings();
         PlayerMod.OnEnable();
     }
+	
+	public static void SplitScreenHooks()
+    {
+         SplitScreenCoop.SplitScreenCoop.alwaysSplit = false;
+         SplitScreenCoop.SplitScreenCoop.allowCameraSwapping = true;
+        //THESE WOULD GET OVERWRITTEN...
+        //IF NEEDED WE COULD JUST OVERWRITE THESE VALUES AS THEY ARE NEEDED, LIKE AT RainWorldGame_Update AND RoomCamera_ChangeCameraToPlayer
+        //THIS DOESN'T SEEM TO WORK, FALLING BACK ON THE ABOVE OPTION
+        /*
+        SplitScreenCoop.SplitScreenCoop.Options.AlwaysSplit.Value = false;
+        SplitScreenCoop.SplitScreenCoop.Options.AllowCameraSwapping.Value = true;
+
+        if (SplitScreenCoop.SplitScreenCoop.Options.PreferredSplitMode.Value == SplitMode.Split4Screen)
+            SplitScreenCoop.SplitScreenCoop.Options.PreferredSplitMode.Value = SplitMode.SplitVertical;
+        */
+    }
+	
 
     private bool IsInit;
     private void RainWorldOnOnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
@@ -173,6 +192,7 @@ public partial class CoopLeash : BaseUnityPlugin
             On.GameSession.ctor += GameSessionOnctor;
 
             On.RainWorldGame.Update += RainWorldGame_Update;
+            On.RainWorldGame.ctor += RainWorldGame_ctor;
             On.ProcessManager.PostSwitchMainProcess += ProcessManager_PostSwitchMainProcess;
 
             On.ShortcutHandler.ShortCutVessel.ctor += ShortCutVessel_ctor;
@@ -212,6 +232,14 @@ public partial class CoopLeash : BaseUnityPlugin
             Logger.LogError(ex);
             throw;
         }
+    }
+
+    private void RainWorldGame_ctor(On.RainWorldGame.orig_ctor orig, RainWorldGame self, ProcessManager manager)
+    {
+        orig(self, manager);
+        //UNDO THOSE SETTINGS READINS
+        if (splitScreenEnabled)
+            SplitScreenHooks();
     }
 
     public static bool SmartCameraActive()
@@ -449,6 +477,9 @@ public partial class CoopLeash : BaseUnityPlugin
         if (myPlayer != null && myPlayer.GetCat().defector)
             self.label.text = "(D)" + self.label.text;
 
+        if (myPlayer != null && myPlayer.GetCat().deniedSplitCam)
+            self.label.text = "!" + self.label.text;
+
         self.size.x = self.label.text.Length;
     }
 
@@ -496,7 +527,7 @@ public partial class CoopLeash : BaseUnityPlugin
             }
 			else
 			{
-                //FOR SPLITSCREEN, IF WE'RE THE FOCUS OF CAM2 WHEN WE CALL THE CAMERA, JUST COLLAPSE THE SECOND SCREEN.
+                //FOR SPLITSCREEN, IF WE'RE THE FOCUS OF CAM2 WHEN WE CALL THE CAMERA, JUST COLLAPSE (or un-collapse) THE SECOND SCREEN.
                 if (splitScreenEnabled && self.room.game.cameras.Count() > 1 && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == self)
                 {
                     // self.GetCat().deniedSplitCam = !self.GetCat().deniedSplitCam; //TOGGLE THIS SETTING - NO THIS ISN''T ENOUGH!
@@ -567,17 +598,20 @@ public partial class CoopLeash : BaseUnityPlugin
             if (graphCounter > 0)
                 graphCounter--;
         }
+		
+		if (cleanupDefectorFlag)
+			CleanupDefectors(self);
 
         if (splitScreenEnabled && SmartCameraActive())
             SplitscreenUpdate(self);
     }
 
-    public static Player GetFirstUndefectedPlayer(RoomCamera self)
+    public static Player GetFirstUndefectedPlayer(RainWorldGame self)
     {
-        for (int i = 0; i < self.room.game.Players.Count; i++)
+        for (int i = 0; i < self.Players.Count; i++)
         {
-            Player plr = self.room.game.Players[i].realizedCreature as Player;
-            if (plr != null && !plr.dead && !plr.inShortcut && !plr.GetCat().defector)
+            Player plr = self.Players[i].realizedCreature as Player;
+            if (plr != null && !plr.dead && !plr.GetCat().defector)
             {
                 return plr;
             }
@@ -585,11 +619,11 @@ public partial class CoopLeash : BaseUnityPlugin
         return null;
     }
 
-    public static Player GetFirstDefectedPlayer(RoomCamera self)
+    public static Player GetFirstDefectedPlayer(RainWorldGame self)
     {
-        for (int i = 0; i < self.game.Players.Count; i++)
+        for (int i = 0; i < self.Players.Count; i++)
         {
-            Player plr = self.game.Players[i].realizedCreature as Player;
+            Player plr = self.Players[i].realizedCreature as Player;
             if (plr != null && !plr.dead && plr.GetCat().defector) //WE CAN INCLUDE PLAYERS IN SHORTCUTS HERE
             {
                 return plr;
@@ -655,18 +689,27 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
 
                 //MAKE SURE MAIN CAM IS NOT FOLLOWING A DEFECTOR (OR DEAD PLAYER), IF ABLE
-                if (self.cameraNumber == 0 && ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector || (self.followAbstractCreature.realizedCreature as Player).dead))
+                if (self.cameraNumber == 0 && ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector))// || (self.followAbstractCreature.realizedCreature as Player).dead))
                 {
+                    //Debug.Log("CHECKING MAIN CAM");
+                    bool foundTarget = false;
                     for (int i = 0; i < self.room.game.Players.Count; i++)
                     {
                         Player plr = self.room.game.Players[i].realizedCreature as Player;
                         if (plr != null && !plr.dead && !plr.inShortcut && !plr.GetCat().defector)
                         {
                             self.ChangeCameraToPlayer(plr.abstractCreature);
+                            foundTarget = true;
+                            //Debug.Log("FIXING MAIN CAM");
                         }
                     }
+                    if (!foundTarget)
+                    {
+                        //OKAY EVERYONE HERE IS EITHER DEAD OR A DEFECTOR, SO YOU ARE THE NEW GROUP LEADER
+                        (self.followAbstractCreature.realizedCreature as Player).GetCat().defector = false;
+                    }
                 }
-
+                
                 //DO NOT ALLOW SPOTLIGHT MODE IF MULTIPLE SCREENS ARE ACTIVE, THAT'S MEAN (UNLESS ITS FOR A DEFECTOR)
                 if (self.cameraNumber == 0 && !(self.followAbstractCreature.realizedCreature as Player).GetCat().defector && MultiScreens())
                     spotlightMode = false;
@@ -1151,7 +1194,7 @@ public partial class CoopLeash : BaseUnityPlugin
             //OK WE NEED TO VERIFY THAT WHEN SOMEONE ELSE IS IN ANOTHER ROOM, THE TWO CAMERAS AREN'T FOCUSED ON UN-DEFECTED PEOPLE IN THE SAME ROOM
             if (splitGroup && self.cameras[1]?.followAbstractCreature?.realizedCreature is Player offcamPlr && !offcamPlr.GetCat().defector)
             {
-                Player firstDefector = GetFirstDefectedPlayer(self.cameras[1]);
+                Player firstDefector = GetFirstDefectedPlayer(self.cameras[1].game);
                 if (firstDefector != null)
                     self.cameras[1].ChangeCameraToPlayer(firstDefector.abstractCreature);
             }
@@ -1489,10 +1532,14 @@ public partial class CoopLeash : BaseUnityPlugin
     {
         self.GetCat().deniedSplitCam = true;
         self.GetCat().defector = true;
-        RainWorldGame myGame = self.room.game;
+        // RainWorldGame myGame = self?.room?.game;
+		cleanupDefectorFlag = true;
 
         orig(self);
-
+    }
+	
+	public static void CleanupDefectors(RainWorldGame myGame)
+	{
         int aliveCount = 0;
         for (int i = 0; i < myGame.Players.Count; i++)
         {
@@ -1503,7 +1550,7 @@ public partial class CoopLeash : BaseUnityPlugin
             }
         }
 
-        //IF ONLY ONE PERSON IS LEFT ALIVE, 
+        //IF ONLY ONE PERSON IS LEFT ALIVE, DEFECT EVERYONE ELSE
         if (aliveCount == 1)
         {
             for (int i = 0; i < myGame.Players.Count; i++)
@@ -1519,7 +1566,9 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
             }
         }
-    }
+		
+		cleanupDefectorFlag = false;
+	}
 
 
     private void ShortcutHandler_Update(On.ShortcutHandler.orig_Update orig, ShortcutHandler self) {
@@ -1562,7 +1611,7 @@ public partial class CoopLeash : BaseUnityPlugin
                                 self.transportVessels[num].wait = 0;
                                 forceDepart = true;
                                 //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
-                                if (splitScreenEnabled && realizedRoom.game.cameras.Length > 1)
+                                if (splitScreenEnabled && !MultiScreens() && realizedRoom.game.cameras.Length > 1)
                                 {
                                     realizedRoom.game.cameras[1].ChangeCameraToPlayer(myPlayer.abstractCreature);
                                     myPlayer.GetCat().defector = true; //WHY WOULD WE NOT DEFECT??
@@ -1708,7 +1757,9 @@ public partial class CoopLeash : BaseUnityPlugin
             player.GetCat().departedFromAltExit = false;
             //IF A SHORTCUT BEACON EXISTS AND WE ARE NOT IN THE SAME ROOM, WE SHOULD BE A DEFECTOR. OR IF WE ARE IN THE JAWS OF A CREATURE
             if (player.dangerGrasp != null) //(splitScreenEnabled && beaconRoom != null && beaconRoom != newRoom) //WE HANDLE THIS ELSEWHERE NOW, HOPEFULLY
-                player.GetCat().defector = true; 
+                player.GetCat().defector = true;
+
+            cleanupDefectorFlag = true; //JUST MAKE SURE WE DIDN'T AUTO DEFECT FROM A ROOM WITH THE ONLY OTHER DEFECTOR, LEAVING ALL PLAYERS AS DEFECTORS
         }
     }
 
