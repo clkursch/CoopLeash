@@ -219,11 +219,13 @@ public partial class CoopLeash : BaseUnityPlugin
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Draw += JollyPlayerArrow_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Update += JollyPlayerArrow_Update;
+            On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.ClampScreenEdge += JollyPlayerArrow_ClampScreenEdge;
 
             //GRAPHICS FREEZES
             //On.RoomRain.DrawSprites += RoomRain_DrawSprites;
             On.MoreSlugcats.BlizzardGraphics.DrawSprites += BlizzardGraphics_DrawSprites;
             On.GlobalRain.Update += GlobalRain_Update;
+            On.FlareBomb.Update += FlareBomb_Update;
 
             IsInit = true;
         }
@@ -232,6 +234,33 @@ public partial class CoopLeash : BaseUnityPlugin
             Logger.LogError(ex);
             throw;
         }
+    }
+
+    private Vector2 JollyPlayerArrow_ClampScreenEdge(On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.orig_ClampScreenEdge orig, JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow self, Vector2 input)
+    {
+        /*
+        Vector2 origScreenSize = self.jollyHud.hud.rainWorld.options.ScreenSize;
+        float camMod = GetCameraZoom(); //(1 / GetCameraZoom()
+        self.jollyHud.hud.rainWorld.options.ScreenSize.Set(origScreenSize.x * camMod, origScreenSize.y * camMod);
+        Vector2 result = orig(self, input);
+        self.jollyHud.hud.rainWorld.options.ScreenSize.Set(origScreenSize.x, origScreenSize.y);
+        return result;
+        */
+
+        
+        if (camScrollEnabled && SmartCameraActive())
+        {
+            Vector2 screenSize = self.jollyHud.hud.rainWorld.options.ScreenSize;
+            float camZoom = (1 / GetCameraZoom());
+            float shiftMod = ((screenSize.x * camZoom) - screenSize.x) / 2f;
+            input.x = Mathf.Clamp(input.x, self.screenEdge - shiftMod, (screenSize.x + shiftMod) - (float)self.screenEdge);
+            float shiftModY = ((screenSize.y * camZoom) - screenSize.y) / 2f;
+            input.y = Mathf.Clamp(input.y, self.screenEdge - shiftModY, (screenSize.y + shiftModY) - (float)self.screenEdge);
+            return input;
+        }
+        else
+            return orig(self, input);
+
     }
 
     private void RainWorldGame_ctor(On.RainWorldGame.orig_ctor orig, RainWorldGame self, ProcessManager manager)
@@ -250,7 +279,7 @@ public partial class CoopLeash : BaseUnityPlugin
     private void GlobalRain_Update(On.GlobalRain.orig_Update orig, GlobalRain self)
     {
         orig(self);
-        if (ModManager.CoopAvailable && CLOptions.latencyMode.Value)
+        if (CLOptions.latencyMode.Value && Custom.rainWorld.processManager.IsGameInMultiplayerContext())
         {
             float dampener = 0f;
             self.ScreenShake *= dampener;
@@ -264,20 +293,43 @@ public partial class CoopLeash : BaseUnityPlugin
         orig(self, sLeaser, rCam, timeStacker, camPos);
         //if (graphCounter <= 0)
         //    graphCounter = 40;
-        if (ModManager.CoopAvailable && CLOptions.latencyMode.Value)
+        if (CLOptions.latencyMode.Value && Custom.rainWorld.processManager.IsGameInMultiplayerContext())
         {
             //sLeaser.sprites[0].isVisible = false;
             sLeaser.sprites[1].isVisible = false;
         }
     }
 
-    private void RoomRain_DrawSprites(On.RoomRain.orig_DrawSprites orig, RoomRain self, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
+    private void FlareBomb_Update(On.FlareBomb.orig_Update orig, FlareBomb self, bool eu)
     {
-        if (self.intensity <= 0.1)
+        orig(self, eu);
+
+        if (CLOptions.latencyMode.Value && Custom.rainWorld.processManager.IsGameInMultiplayerContext())
         {
-            orig(self, sLeaser, rCam, timeStacker, camPos);
+            if (self.burning > 0f)
+            {
+                float flashAvrg = 0.75f;
+                float avgIntensity = self.LightIntensity;
+                if (self.LightIntensity > 0.2f)
+                    avgIntensity = 1.0f;
+
+                self.lastFlickerDir = new Vector2(0, 0);
+                self.flickerDir = new Vector2(0, 0);
+                self.flashAplha = Mathf.Pow(flashAvrg, 0.3f) * avgIntensity;
+                self.lastFlashAlpha = self.flashAplha;
+                self.flashRad = Mathf.Pow(flashAvrg, 0.3f) * avgIntensity * 200f * 16f;
+                self.lastFlashRad = self.flashRad;
+            }
+
+            if (self.light != null)
+            {
+                float flashAvrg = 0.75f;
+                self.light.setAlpha = new float?(((self.mode == Weapon.Mode.Thrown) ? Mathf.Lerp(0.5f, 1f, flashAvrg) : 0.5f) * (1f - 0.6f * self.LightIntensity));
+                self.light.setRad = new float?(Mathf.Max(self.flashRad, ((self.mode == Weapon.Mode.Thrown) ? Mathf.Lerp(60f, 290f, flashAvrg) : 60f) * 1f + self.LightIntensity * 10f));
+            }
         }
     }
+
 
     private PhysicalObject Player_PickupCandidate(On.Player.orig_PickupCandidate orig, Player self, float favorSpears)
     {
@@ -432,6 +484,11 @@ public partial class CoopLeash : BaseUnityPlugin
             //TRY TO CENTER THEM
             Vector2 centerScreen = new Vector2(self.jollyHud.hud.rainWorld.options.ScreenSize.x / 2f, self.jollyHud.hud.rainWorld.options.ScreenSize.y / 2f);
             Vector2 zoomAdjusted = Vector2.Lerp(centerScreen, self.mainSprite.GetPosition(), GetCameraZoom());
+            //WAIT NO OKAY IT'S ALL THE CLAMP. ZOOMUNLIMITED IS NOT NEEDED
+            //Vector2 zoomAdjusted = Vector2.Lerp(centerScreen, self.mainSprite.GetPosition(), Mathf.Pow(zoomUnlimited, 1f/3f)); 
+            //Vector2 zoomAdjusted = Vector2.Lerp(centerScreen, self.mainSprite.GetPosition(), zoomUnlimited);
+            //OKAY AT THIS POINT IT'S CLEAR THIS MATH MAY NOT BE THE ISSUE, BUT THE CLAMPING THAT COMES AFTERWARDS... I THINK ZOOMUNLIMITED WAS NEEDED THO
+            //UHHH TIMES 2 MINUS SCREENSIZEX / 2 OR SOMETHING REPLACE THAT WITH ZOOM?...  //Mathf.Sqrt(
             self.mainSprite.SetPosition(zoomAdjusted);
 
             //OKAY WAIT HOW DO THESE EVEN GET DESYNCED? IS SOME OTHER MOD MESSING WITH THE SPRITE POSITION?? -OH WAIT THERES ANOTHER VERSION OF THE BODYPOS... (TARGETPOS) FORGET THAT THOUGH
@@ -990,6 +1047,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
 
     public static float zoomMemory = 1f;
+    //public static float zoomUnlimited = 1f;
     public static void SBCameraZoom(RoomCamera self, float xExtra, float yExtra)
     {
         //if (MultiScreens())
@@ -1015,8 +1073,13 @@ public partial class CoopLeash : BaseUnityPlugin
         //Debug.Log("ZOOM: " + zoomMod + " - " + xExtra + " - " + self.cameraNumber);
 
         if (camScrollEnabled && self.cameraNumber == 0)
+        {
             SBCameraApply(zoomMod);
-        
+            //zoomUnlimited = 1f + Mathf.Max((xExtra - xLimit) / xLimit, (yExtra - yLimit) / yLimit, 0f);//CALCULATE WHAT THE UNCAPPED ZOOM WOULD BE SO WE CAN CORRECT OUR PLAYER ARROWS
+            //zoomUnlimited = baseZoom * (1f / zoomUnlimited);
+            //Debug.Log("ZOOM " + zoomMod + " - " + zoomUnlimited);
+        }
+
         ApplyCameraZoom(self, GetCameraZoom()); //zoomMod
     }
 
@@ -1560,7 +1623,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 {
                     plr.GetCat().defector = false;
                 }
-                else
+                else if (plr != null)
                 {
                     plr.GetCat().defector = true;
                 }
