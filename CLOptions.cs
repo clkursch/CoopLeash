@@ -188,7 +188,7 @@ public class CLOptions : OptionInterface
         {
             mpBox12 = new OpCheckBox(CLOptions.latencyMode, new Vector2(margin + 300, lineCount + 50f))
             {description = dsc},
-            new OpLabel(mpBox12.pos.x + 30, mpBox12.pos.y+3, Translate("Remote Play Latency Mode"))
+            new OpLabel(mpBox12.pos.x + 30, mpBox12.pos.y+3, Translate("Remote Play Bitrate Mode"))
             {description = dsc}
         });
 
