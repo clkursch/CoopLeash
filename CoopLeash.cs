@@ -213,6 +213,8 @@ public partial class CoopLeash : BaseUnityPlugin
             On.ShortcutHandler.Update += ShortcutHandler_Update;
             On.Menu.ControlMap.ctor += ControlMap_ctor;
             On.Lizard.Update += Lizard_Update;
+            On.DeathFallGraphic.InitiateSprites += DeathFallGraphic_InitiateSprites;
+            On.DeathFallGraphic.DrawSprites += DeathFallGraphic_DrawSprites;
 
             On.Player.PickupCandidate += Player_PickupCandidate;
 
@@ -328,6 +330,23 @@ public partial class CoopLeash : BaseUnityPlugin
                 self.light.setRad = new float?(Mathf.Max(self.flashRad, ((self.mode == Weapon.Mode.Thrown) ? Mathf.Lerp(60f, 290f, flashAvrg) : 60f) * 1f + self.LightIntensity * 10f));
             }
         }
+    }
+
+
+    //CORRECT SOME GRAPHICS THAT GET MESSED UP BY THE CAMERA ZOOM
+    public static float deathPitGraphicSize = 0f;
+    private void DeathFallGraphic_InitiateSprites(On.DeathFallGraphic.orig_InitiateSprites orig, DeathFallGraphic self, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
+    {
+        orig(self, sLeaser, rCam);
+        deathPitGraphicSize = sLeaser.sprites[0].scaleX;
+    }
+
+    private void DeathFallGraphic_DrawSprites(On.DeathFallGraphic.orig_DrawSprites orig, DeathFallGraphic self, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
+    {
+        if (camScrollEnabled)
+            sLeaser.sprites[0].scaleX = deathPitGraphicSize * (1 / GetCameraZoom());
+
+        orig(self, sLeaser, rCam, timeStacker, camPos);
     }
 
 
@@ -484,11 +503,6 @@ public partial class CoopLeash : BaseUnityPlugin
             //TRY TO CENTER THEM
             Vector2 centerScreen = new Vector2(self.jollyHud.hud.rainWorld.options.ScreenSize.x / 2f, self.jollyHud.hud.rainWorld.options.ScreenSize.y / 2f);
             Vector2 zoomAdjusted = Vector2.Lerp(centerScreen, self.mainSprite.GetPosition(), GetCameraZoom());
-            //WAIT NO OKAY IT'S ALL THE CLAMP. ZOOMUNLIMITED IS NOT NEEDED
-            //Vector2 zoomAdjusted = Vector2.Lerp(centerScreen, self.mainSprite.GetPosition(), Mathf.Pow(zoomUnlimited, 1f/3f)); 
-            //Vector2 zoomAdjusted = Vector2.Lerp(centerScreen, self.mainSprite.GetPosition(), zoomUnlimited);
-            //OKAY AT THIS POINT IT'S CLEAR THIS MATH MAY NOT BE THE ISSUE, BUT THE CLAMPING THAT COMES AFTERWARDS... I THINK ZOOMUNLIMITED WAS NEEDED THO
-            //UHHH TIMES 2 MINUS SCREENSIZEX / 2 OR SOMETHING REPLACE THAT WITH ZOOM?...  //Mathf.Sqrt(
             self.mainSprite.SetPosition(zoomAdjusted);
 
             //OKAY WAIT HOW DO THESE EVEN GET DESYNCED? IS SOME OTHER MOD MESSING WITH THE SPRITE POSITION?? -OH WAIT THERES ANOTHER VERSION OF THE BODYPOS... (TARGETPOS) FORGET THAT THOUGH
@@ -1073,12 +1087,7 @@ public partial class CoopLeash : BaseUnityPlugin
         //Debug.Log("ZOOM: " + zoomMod + " - " + xExtra + " - " + self.cameraNumber);
 
         if (camScrollEnabled && self.cameraNumber == 0)
-        {
             SBCameraApply(zoomMod);
-            //zoomUnlimited = 1f + Mathf.Max((xExtra - xLimit) / xLimit, (yExtra - yLimit) / yLimit, 0f);//CALCULATE WHAT THE UNCAPPED ZOOM WOULD BE SO WE CAN CORRECT OUR PLAYER ARROWS
-            //zoomUnlimited = baseZoom * (1f / zoomUnlimited);
-            //Debug.Log("ZOOM " + zoomMod + " - " + zoomUnlimited);
-        }
 
         ApplyCameraZoom(self, GetCameraZoom()); //zoomMod
     }
