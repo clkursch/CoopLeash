@@ -124,9 +124,6 @@ public partial class CoopLeash : BaseUnityPlugin
 
         if (improvedInputEnabled)
             Initialize_Custom_Input();
-		
-		//if (splitScreenEnabled) //NOPE, NOT LATE ENOUGH
-		//	SplitScreenHooks();
     }
 
     public static void CamScrollHooks()
@@ -269,13 +266,18 @@ public partial class CoopLeash : BaseUnityPlugin
     {
         orig(self, manager);
         //UNDO THOSE SETTINGS READINS
-        if (splitScreenEnabled)
+        if (SplitScreenActive())
             SplitScreenHooks();
     }
 
     public static bool SmartCameraActive()
     {
-        return (CLOptions.smartCam.Value && (camScrollEnabled || splitScreenEnabled));  //
+        return (CLOptions.smartCam.Value && camScrollEnabled);  //splitScreenEnabled
+    }
+	
+	public static bool SplitScreenActive()
+    {
+        return (SmartCameraActive() && splitScreenEnabled);
     }
 
     private void GlobalRain_Update(On.GlobalRain.orig_Update orig, GlobalRain self)
@@ -832,7 +834,7 @@ public partial class CoopLeash : BaseUnityPlugin
                             }
                             
                             //IF THE OFF-CAMERA FROM SPLITSCREEN WAS FOCUSED ON US, UN-SPLIT THE CAMERAS. YES WE NEED TO DO THIS RIGHT NOW OTHERWISE IT WILL MESS UP THE DEFECTOR CALCULATIONS BELOW
-                            if (splitScreenEnabled && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == plr)
+                            if (SplitScreenActive() && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == plr)
                             {
                                 SplitscreenUpdate(self.room?.game);
                             }
@@ -1683,7 +1685,7 @@ public partial class CoopLeash : BaseUnityPlugin
                                 self.transportVessels[num].wait = 0;
                                 forceDepart = true;
                                 //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
-                                if (splitScreenEnabled && !MultiScreens() && realizedRoom.game.cameras.Length > 1)
+                                if (SplitScreenActive() && !MultiScreens() && realizedRoom.game.cameras.Length > 1)
                                 {
                                     realizedRoom.game.cameras[1].ChangeCameraToPlayer(myPlayer.abstractCreature);
                                     myPlayer.GetCat().defector = true; //WHY WOULD WE NOT DEFECT??
