@@ -437,7 +437,7 @@ public partial class CoopLeash : BaseUnityPlugin
 				&& (ValidPlayerForRoom(checkPlayer, myRoom) || checkPlayer.inShortcut)
                 && checkPlayer.onBack == null
                 //&& checkPlayer.inShortcut == false
-                && !(checkPlayer.dead || checkPlayer.dangerGraspTime > 0) //CHECK THESE NOW SINCE BEING IN A SHORTCUT NEGATES THE VALIDATION CHECK
+                && !(checkPlayer.dead || checkPlayer.dangerGraspTime > 0 || (checkPlayer.inShortcut && checkPlayer.grabbedBy.Count > 0)) //CHECK THESE NOW SINCE BEING IN A SHORTCUT NEGATES THE VALIDATION CHECK
 				&& checkPlayer.AI != null && checkPlayer.AI.abstractAI.isTamed
             )
 			{
@@ -1430,6 +1430,8 @@ public partial class CoopLeash : BaseUnityPlugin
 
     public bool IsWarpPressed(Player player, bool piped)
     {
+        if (player.isNPC)
+            return false; //PUPS CAN'T PRESS BUTTONS
         if (!improvedInputEnabled)
         {
             if (piped)
@@ -1500,7 +1502,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
         if (self.room != null && ValidPlayer(self)) {
             
-            if (CLOptions.warpButton.Value && self.room == beaconRoom)
+            if (CLOptions.warpButton.Value && self.room == beaconRoom && !self.isNPC)
             {
                 //CHECK FOR DISTANCE REQUIREMENTS TO TELEPORT! //CHECK IF ENOUGH SLUGS ARE IN THE TUBE TO ALLOW TELEPORT
                 bool distReq = !CLOptions.proximityReq.Value || Custom.DistLess(self.bodyChunks[0].pos, self.room.MiddleOfTile(shortCutBeacon), CLOptions.proxDist.Value * 20);
@@ -1690,7 +1692,7 @@ public partial class CoopLeash : BaseUnityPlugin
                                     realizedRoom.game.cameras[1].ChangeCameraToPlayer(myPlayer.abstractCreature);
                                     myPlayer.GetCat().defector = true; //WHY WOULD WE NOT DEFECT??
                                 }
-                                else if (!splitScreenEnabled) //DON'T FOCUS US IF SPLITSCREEN IS ON. THE 2ND CAM WILL AUTO TARGET US
+                                else if (SmartCameraActive() && !splitScreenEnabled) //DON'T FOCUS US IF SPLITSCREEN IS ON. THE 2ND CAM WILL AUTO TARGET US
                                 {
                                     realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
                                     //myPlayer.GetCat().defector = true; //MAYBE WE DON'T NEED TO DO THIS?...
@@ -1875,7 +1877,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
             
             //ENTERING THE PIPE WILL BREAK CAMERA PANNING BECAUSE WE CAN NO LONGER STRETCH OUR TORSO. HAND CAMERA CONTROL TO SOMEONE ELSE! SOMEONE NOT IN A PIPE
-            if (creature.abstractCreature == room.game.cameras[0].followAbstractCreature && othersInRoom > 0)
+            if (SmartCameraActive() && creature.abstractCreature == room.game.cameras[0].followAbstractCreature && othersInRoom > 0)
             {
                 for (int i = 0; i < room.game.Players.Count; i++)
                 {

@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using UnityEngine;
 
 namespace CoopLeash;
 
@@ -29,7 +30,7 @@ public static class PlayerMod {
         int player_number = player.playerState.playerNumber;
         if (player_number < 0) return player.input[0].mp && !player.input[1].mp;
         if (player_number >= maximum_number_of_players) return player.input[0].mp && !player.input[1].mp;
-
+        
         InputPackageMod[] custom_input = custom_input_list[player_number];
         return custom_input[0].warp_btn && !custom_input[1].warp_btn;
     }
@@ -42,6 +43,8 @@ public static class PlayerMod {
     private static void Player_CheckInput(On.Player.orig_checkInput orig, Player player) {
         // update player.input first;
         orig(player);
+        if (player.isNPC)
+            return;
 
         int player_number = player.playerState.playerNumber;
         if (player_number < 0) return;
