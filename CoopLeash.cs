@@ -754,7 +754,7 @@ public partial class CoopLeash : BaseUnityPlugin
                                 }
                             }
                         }
-                    }
+                    } 
                     //WE ALWAYS UPDATE ZOOM (BECAUSE WE NEED TO INHERIT CAM[0]'S ZOOM LEVEL)
                     SBCameraZoom(self, 0f, 0f); //RUNNING THIS AS ANYTHING OTHER THAN MAIN CAM JUST SETS ZOOM LEVEL TO MAIN CAM'S LEVEL
                     orig(self); //OKAY JUST RUN ORIG AND BE DONE
@@ -778,7 +778,12 @@ public partial class CoopLeash : BaseUnityPlugin
                     }
                     if (!foundTarget)
                     {
-                        //OKAY EVERYONE HERE IS EITHER DEAD OR A DEFECTOR, SO YOU ARE THE NEW GROUP LEADER
+                        Debug.Log("OKAY EVERYONE HERE IS EITHER DEAD OR A DEFECTOR, SO YOU ARE THE NEW GROUP LEADER");
+                        //BUT FIRST, DEFECT EVERYONE ELSE. WE CAN'T HAVE ALL NON-DEFECTORS IN SEPERATE ROOMS
+                        for (int i = 0; i < self.room.game.Players.Count; i++) //ACTUALLY WE MIGHT NOT HAVE EVEN NEEDED THIS PART BUT IT MAKES SENSE SO IM LEAVING IT IN
+                        {
+                            (self.room.game.Players[i].realizedCreature as Player).GetCat().defector = true;
+                        }
                         (self.followAbstractCreature.realizedCreature as Player).GetCat().defector = false;
                     }
                 }
@@ -815,7 +820,9 @@ public partial class CoopLeash : BaseUnityPlugin
 				if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room)
 				{
 					//IF WE'RE A DEFECTOR, CHECK TO SEE IF WE CAN REJOIN THE GROUP REAL QUICK
-					if (plr.GetCat().defector && plr.GetCat().justDefected <= 0 && plr.GetCat().pipeType != "other") //DON'T TRACK IN SHORTCUTS, SINCE IT SEEMS THE GAME WILL CHECK YOUR POSITION FROM THE PREVIOUS ROOM. SNEAKY LITTLE SHITE...
+					if (plr.GetCat().defector && plr.GetCat().justDefected <= 0 
+                        && plr.room == GetFirstUndefectedPlayer(self.room.game)?.room //ALSO, WE CAN'T REJOIN IF WE AREN'T IN THE SAME ROOM, DUMBO //self.room.game.cameras[0].room
+                        && plr.GetCat().pipeType != "other") //DON'T TRACK IN SHORTCUTS, SINCE IT SEEMS THE GAME WILL CHECK YOUR POSITION FROM THE PREVIOUS ROOM. SNEAKY LITTLE SHITE...
 					{
                         //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325)
                         //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f * 2f * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325 * 2f * (1f / GetWidestCameraZoom())) //self.lastPos
@@ -825,6 +832,7 @@ public partial class CoopLeash : BaseUnityPlugin
                         if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < (1250f - (xDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < (675f - (yDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()))
                         {
                             plr.GetCat().defector = false;
+                            Debug.Log("UNDEFECTING " + plr.playerState.playerNumber);
                             //IF WE HAD BEEN FORCED OUT OF OUR GROUP, WE CAN AUTO-REJOIN OUT OF SPOTLIGHT MODE
                             if (plr.GetCat().forcedDefect && spotlightMode)
                             {
