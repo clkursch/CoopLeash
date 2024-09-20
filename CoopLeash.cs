@@ -1821,6 +1821,10 @@ public partial class CoopLeash : BaseUnityPlugin
                 player.GetCat().defector = true;
                 player.GetCat().departedFromAltExit = true;
             }
+
+            //IF WE HAVE "WAIT FOR EVERYONE" DISABLED (FOR SOME GOD UNKOWN REASON) WE NEED TO DEFECT THE MOMENT WE ENTER A PIPE
+            if (CLOptions.waitForAll.Value == false)
+                player.GetCat().defector = true;
         }
         orig(self, entrancePos, carriedByOther);
         //AND THEN ShortcutHandler.SuckInCreature RUNS (THE ONE UNDER US)
@@ -2027,7 +2031,7 @@ public static class PipeStatusClass
             // Initialize your variables here! (Anything not added here will be null or false or 0 (default values))
             this.pipeType = "untubed";
             this.lastRoom = "";
-			this.defector = false;
+			this.defector = false; //ACTUALLY I DON'T THINK WE EVEN USE THIS
             this.forcedDefect = false;
 			this.forceDepart = 0;
 			this.bodyPosMemory = new Vector2(0, 0);
