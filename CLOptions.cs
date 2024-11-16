@@ -28,6 +28,8 @@ public class CLOptions : OptionInterface
 		CLOptions.bringPups = this.config.Bind<bool>("bringPups", true);
         CLOptions.autoSplitScreen = this.config.Bind<bool>("autoSplitScreen", true);
         CLOptions.latencyMode = this.config.Bind<bool>("latencyMode", true);
+        CLOptions.allowSpotlights = this.config.Bind<bool>("allowSpotlights", false);
+        CLOptions.screenLimitMult = this.config.Bind<float>("screenLimitMult", 0.8f, new ConfigAcceptableRange<float>(0.7f, 1.0f));
     }
 
     public readonly Configurable<float> PlayerSpeed;
@@ -46,11 +48,14 @@ public class CLOptions : OptionInterface
 	public static Configurable<bool> bringPups;
     public static Configurable<bool> autoSplitScreen;
     public static Configurable<bool> latencyMode;
+    public static Configurable<bool> allowSpotlights;
+    public static Configurable<float> screenLimitMult;
 
     private UIelement[] UIArrPlayerOptions;
 
 	public OpSlider pDistOp;
     public OpFloatSlider pZoomOp;
+    public OpFloatSlider pMarginsOp;
     public OpCheckBox mpBox1;
     public OpCheckBox mpBox2;
 	public OpCheckBox mpBox3;
@@ -61,6 +66,7 @@ public class CLOptions : OptionInterface
     public OpCheckBox mpBox10;
     public OpCheckBox mpBox11;
     public OpCheckBox mpBox12;
+    public OpCheckBox mpBox13;
     public OpLabel lblOp1;
 
     public static bool splitScreenEnabled;
@@ -88,12 +94,13 @@ public class CLOptions : OptionInterface
 		
 		
 		//I DO THINGS MY WAY
-		float lineCount = 580;
+		float lineCount = 590;
 		int margin = 20;
 		string dsc = "";
-		
-		// margin += 150;
-		lineCount -= 60;
+        string dsc2 = "";
+
+        // margin += 150;
+        lineCount -= 60;
 		//OpCheckBox mpBox1;
 		dsc = Translate("Players must wait for everyone before leaving a room");
 		Tabs[0].AddItems(new UIelement[]
@@ -194,12 +201,19 @@ public class CLOptions : OptionInterface
 
 
         dsc = Translate("The camera will pan towards the center of the group");
+        dsc2 = Translate("Tap the MAP button to toggle between group focus and solo focus");
         Tabs[0].AddItems(new UIelement[]
         {
-            mpBox6 = new OpCheckBox(CLOptions.smartCam, new Vector2(margin  + 360, lineCount - 20f))
+            mpBox6 = new OpCheckBox(CLOptions.smartCam, new Vector2(margin  + 330, lineCount - 10f))
             {description = dsc},
             new OpLabel(mpBox6.pos.x + 30, mpBox6.pos.y+3, Translate("Smart Camera"))
             {description = dsc},
+            
+            mpBox13 = new OpCheckBox(CLOptions.allowSpotlights, new Vector2(margin  + 450, lineCount - 10f))
+            {description = dsc2},
+            new OpLabel(mpBox13.pos.x + 30, mpBox13.pos.y+3, Translate("Spotlights"))
+            {description = dsc2},
+
             new OpLabel(mpBox6.pos.x + 0, mpBox6.pos.y+23, "(" + Translate("Requires SBCameraScroll mod") + ")")
         });
 
@@ -209,9 +223,11 @@ public class CLOptions : OptionInterface
         
         Tabs[0].AddItems(new UIelement[]
         {
-            pZoomOp = new OpFloatSlider(CLOptions.zoomLimit, new Vector2(margin + 380, lineCount -20f -35f), barLngtInt, 1, false) {description = dsc},
-            new OpLabel(pZoomOp.pos.x - 5, pZoomOp.pos.y - 15, Translate("Zoom-Out Limit"), bigText: false) {alignment = FLabelAlignment.Center}
-            //new OpLabel(pZoomOp.pos.x - 20, pZoomOp.pos.y, Translate("Off"), bigText: false) {alignment = FLabelAlignment.Left}
+            pZoomOp = new OpFloatSlider(CLOptions.zoomLimit, new Vector2(margin + 380, lineCount -20f -25f), barLngtInt, 1, false) {description = dsc},
+            new OpLabel(pZoomOp.pos.x - 5, pZoomOp.pos.y - 13, Translate("Zoom-Out Limit"), bigText: false) {alignment = FLabelAlignment.Center},
+
+            pMarginsOp = new OpFloatSlider(CLOptions.screenLimitMult, new Vector2(margin + 380, lineCount -20f -75f), barLngtInt, 1, false) {description = Translate("How far apart players can get before they leave group focus. Higher numbers allow players closer to the camera borders")},
+            new OpLabel(pMarginsOp.pos.x - 5, pMarginsOp.pos.y - 13, Translate("Camera Margins"), bigText: false) {alignment = FLabelAlignment.Center}
         });
 
         //if (CoopLeash.camScrollEnabled)
@@ -220,7 +236,7 @@ public class CLOptions : OptionInterface
         dsc = Translate("Automatically split the screen when a player is offscreen. If disabled, the screen will not split until a player calls the camera from offscreen.");
         Tabs[0].AddItems(new UIelement[]
         {
-            mpBox11 = new OpCheckBox(CLOptions.autoSplitScreen, new Vector2(margin  + 360, lineCount - 20f -110f))
+            mpBox11 = new OpCheckBox(CLOptions.autoSplitScreen, new Vector2(margin  + 330, lineCount - 20f -150f))
             {description = dsc},
             new OpLabel(mpBox11.pos.x + 30, mpBox11.pos.y+3, Translate("Auto Split Off-Screen"))
             {description = dsc},
@@ -271,7 +287,7 @@ public class CLOptions : OptionInterface
 
 
         
-        int descLine = 200;
+        int descLine = 180;
         Tabs[0].AddItems(new OpLabel(25f, descLine + 25f, "--- " + Translate("How It Works") + ": ---"));
         // Tabs[0].AddItems(new OpLabel(25f, descLine, "Press up against stuck creatures to push them. Grab them to pull"));
         // descLine -= 20;
@@ -294,8 +310,9 @@ public class CLOptions : OptionInterface
         descLine -= 35;
         Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("If the SBCameraScroll mod is enabled, the camera will pan evenly between all players")));
         descLine -= 20;
-        Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Tap the MAP button to toggle between group focus and solo focus")));
-        descLine -= 20;
+        //YOURE OUTTA HERE!
+        //Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Tap the MAP button to toggle between group focus and solo focus")));
+        //descLine -= 20;
         Tabs[0].AddItems(new OpLabel(25f, descLine, Translate("Getting too far off-screen will remove you from group focus until you get close enough to re-group")));
 
     }
@@ -370,10 +387,14 @@ public class CLOptions : OptionInterface
             if (smartCam)
             {
                 this.pZoomOp.greyedOut = false;
+                this.pMarginsOp.greyedOut = false;
+                this.mpBox13.greyedOut = false;
             }
             else
             {
                 this.pZoomOp.greyedOut = true;
+                this.pMarginsOp.greyedOut = true;
+                this.mpBox13.greyedOut = true;
             }
 
             if (CoopLeash.splitScreenEnabled && smartCam)

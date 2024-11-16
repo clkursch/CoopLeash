@@ -12,6 +12,8 @@ using System.Runtime.CompilerServices;
 using static SplitScreenCoop.SplitScreenCoop;
 using BepInEx.Bootstrap;
 using MonoMod.RuntimeDetour;
+using UnityEngine.LowLevel;
+using BepInEx.Logging;
 
 #pragma warning disable CS0618
 
@@ -23,9 +25,15 @@ namespace CoopLeash;
 [BepInPlugin("WillowWisp.CoopLeash", "Stick Together", "1.0.0")]
 
 /*
-Test
--Exclude slugpups from all checks
-
+-Added a remix menu slider for Camera Margins and increased the default margins to give players more distance from the edge
+-The "Spotlight" camera calling ability is now a setting in the remix menu, and it is now disabled by default
+-A small player-colored progress bar will appear when holding jump to force-depart through a pipe
+-Force-departing through a pipe no longer steals the camera if another defected player already has the camera
+-Departing from a room won't cause the screen to split until the player's shortcut position actually transitions to the next room
+-In splitscreen, with 2 players, players will keep the same camera number every time it splits
+-Fixed groups departing early and leaving players behind if they were in a shortcut at the time
+-Generally smoothed out the camera changes between rooms, and improved camera focus logic when "wait for everyone" is disabled
+-Pressing random buttons while waiting in a pipe will display a quick reminder of the pipe controls
 
 --WORKSHOP DESCRIPTION--
 
@@ -68,16 +76,13 @@ Players sitting idle in shortcut entrances will be pushed into the shortcut if a
 quick-piggyback can be done on players dangling from saint's tongue, grapple worms, or while treading surface water, regardless of if they are standing
 Added safeguards to fix an issue where a room with a player offscreen would get unloaded and the player would be unable to take camera
 Fixed an issue where disabling "allow splitting up" would make ALL shortcuts unusable while a warp beacon was active
-
-//fixed pet leash not warping tamed lizards in non-co-op games 
--uPDATED ApplyCameraZoom to maybe be compatible with splitscreen?
--"SplitByRoom" option
 */
 
 public partial class CoopLeash : BaseUnityPlugin
 {
     private CLOptions Options;
     public static bool is_post_mod_init_initialized = false;
+    public static bool shownHudHint = false;
 
     public CoopLeash()
     {
@@ -556,11 +561,35 @@ public partial class CoopLeash : BaseUnityPlugin
         self.size.x = self.label.text.Length;
     }
 
-    
+
+    public static bool TwoPlayerSplitscreenMode()
+    {
+        return (splitScreenEnabled && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount >= 2);
+    }
+
+    public static bool TwoPlusPlayerSplitscreenMode()
+    {
+        return (splitScreenEnabled && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount >= 2);
+    }
+
+
     private void Player_TriggerCameraSwitch(On.Player.orig_TriggerCameraSwitch orig, Player self)
     {
         if (CLOptions.allowDeadCam.Value == false && self.dead)
             return;
+
+        //FOR SIGMA. WHILE SPLITSCREEN IS ACTIVE, DON'T ALLOW CAMERA CALLING UNLESS THE SCREEN IS SPLIT AND YOU ARE A DEFECTOR NOT ON EITHER SCREEN
+        if (TwoPlusPlayerSplitscreenMode() && !(self.GetCat().defector && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature != self))
+        {
+            orig(self);
+            return;
+        }
+        //THIS DIDN'T SEEM TO FIX ANYTHING
+        //if (TwoPlayerSplitscreenMode() && self.room?.game?.cameras[self.playerState.playerNumber]?.followAbstractCreature?.realizedCreature == self)
+        //{
+        //    orig(self);
+        //    return;
+        //}
 
         if (SmartCameraActive() == false || self.timeSinceSpawned < 10)
         {
@@ -621,12 +650,15 @@ public partial class CoopLeash : BaseUnityPlugin
 					self.GetCat().noCam = Math.Max(CLOptions.camPenalty.Value, 3) * 40;
                 if (groupFocusCount == 1) //IF THERE'S ONLY ONE PERSON TO HAND IT TO, DON'T PUT IT IN SPOTLIGHT MODE. HE DON'T NEED IT
                     spotlightMode = false;
-                else
+                else 
                     spotlightMode = true;
 			}
 		}
 		else //ELSE. WE SHOULD JUST ALWAYS JUST TOGGLE
 			spotlightMode = !spotlightMode;
+
+        if (CLOptions.allowSpotlights.Value == false)
+            spotlightMode = false;
 
         //Debug.Log("CAM SWITCH: " + self.playerState.playerNumber + " - " + cycleSwitch + " - " + Custom.rainWorld.options.cameraCycling + " NOW SPOTLIGHTED? " + spotlightMode);
         bool origCycle = Custom.rainWorld.options.cameraCycling;
@@ -714,6 +746,26 @@ public partial class CoopLeash : BaseUnityPlugin
     float xDistanceMemory = 0f;
     float yDistanceMemory = 0f;
 
+    //public static float screenLimitMult = 0.8f; //!!1f
+    //public static float xScreenLimit = 1100 * screenLimitMult;
+    //public static float yScreenLimit = 600 * screenLimitMult;
+    public static float marginsMult = 1.10f; //!!1.17f; //AT WHAT POINT SHOULD WE DEFECT FROM THE GROUP
+    
+
+    public static Vector2 ScreenLimit()
+    {
+        return new Vector2(1100 * CLOptions.screenLimitMult.Value, 600 * CLOptions.screenLimitMult.Value);
+    }
+
+    public static float GetRejoinMargins(float input)
+    {
+        return Mathf.Lerp(input, input * marginsMult, 0.5f); //AT WHAT POINT SHOULD WE REJOIN (HALFWAY BETWEEN THE DEFECT MARGINS AND BASE SCREEN MARGINS (FOR ZOOMING)
+    }
+
+    //1250f
+    //675f
+    //float xLimit = 1300 * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x; //GetWidestCameraZoom
+    //float yLimit = 700
 
     bool spotlightMode = false;
     public void RoomCamera_Update(On.RoomCamera.orig_Update orig, RoomCamera self) 
@@ -762,7 +814,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
 
                 //MAKE SURE MAIN CAM IS NOT FOLLOWING A DEFECTOR (OR DEAD PLAYER), IF ABLE
-                if (self.cameraNumber == 0 && ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector))// || (self.followAbstractCreature.realizedCreature as Player).dead))
+                if (!TwoPlayerSplitscreenMode() && self.cameraNumber == 0 && ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector))// || (self.followAbstractCreature.realizedCreature as Player).dead))
                 {
                     //Debug.Log("CHECKING MAIN CAM");
                     bool foundTarget = false;
@@ -782,7 +834,9 @@ public partial class CoopLeash : BaseUnityPlugin
                         //BUT FIRST, DEFECT EVERYONE ELSE. WE CAN'T HAVE ALL NON-DEFECTORS IN SEPERATE ROOMS
                         for (int i = 0; i < self.room.game.Players.Count; i++) //ACTUALLY WE MIGHT NOT HAVE EVEN NEEDED THIS PART BUT IT MAKES SENSE SO IM LEAVING IT IN
                         {
-                            (self.room.game.Players[i].realizedCreature as Player).GetCat().defector = true;
+                            Player plr = self.room.game.Players[i].realizedCreature as Player;
+                            if (plr != null) //CHECK FOR NULL DUMMY
+                                plr.GetCat().defector = true;
                         }
                         (self.followAbstractCreature.realizedCreature as Player).GetCat().defector = false;
                     }
@@ -829,7 +883,7 @@ public partial class CoopLeash : BaseUnityPlugin
                         //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f * 2f * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325 * 2f * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y)
                         //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 1300 && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 700) //I GIVE UP... THIS IS THE BEST I CAN DO
                         //OKAY IT'S NOT PERFECT, I THINK SOME OF THESE VALUES NEED TO BE MULTIPLIED BY THE GETWIDESTCAMERAZOOM MODIFIER AS WELL, BUT IT'S WAAAY BETTER THAN IT USED TO BE
-                        if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < (1250f - (xDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < (675f - (yDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()))
+                        if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < (GetRejoinMargins(ScreenLimit().x * ScreenSizeMod().x) - (xDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < (GetRejoinMargins(ScreenLimit().y * ScreenSizeMod().y) - (yDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()))
                         {
                             plr.GetCat().defector = false;
                             Debug.Log("UNDEFECTING " + plr.playerState.playerNumber);
@@ -909,7 +963,7 @@ public partial class CoopLeash : BaseUnityPlugin
             {
 
                 //IF WE'RE FOCUSED ON SOMEONE IN A PIPE, QUICKLY SWITCH IT TO THE FIRST AVAILABLE NON-PIPE PLAUER
-                if ((self.followAbstractCreature.realizedCreature as Player).inShortcut)
+                if ((self.followAbstractCreature.realizedCreature as Player).inShortcut && !(TwoPlayerSplitscreenMode() && MultiScreens())) //EXCEPT IF THE SCREEN IS SPLIT IN 2P SPLITSCREEN MODE
                 {
                     for (int i = 0; i < self.room.game.Players.Count; i++)
                     {
@@ -934,8 +988,8 @@ public partial class CoopLeash : BaseUnityPlugin
                 float avgY = totalY / totalCnt;
                 Player mostBehindPlayer = null;
                 float mostBehind = 0;
-                float xLimit = 1300 * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x; //GetWidestCameraZoom
-                float yLimit = 700 * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y;
+                float xLimit = (ScreenLimit().x * marginsMult) * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x; //1300
+                float yLimit = (ScreenLimit().y * marginsMult) * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y; //700
                 xDistanceMemory = Mathf.Abs(maxLeft - maxRight);
                 yDistanceMemory = Mathf.Abs(maxUp - maxDown);
 
@@ -1043,14 +1097,18 @@ public partial class CoopLeash : BaseUnityPlugin
 
         //SHOW THE BEACON FX AROUND THE PIPE
         Creature creature = (self.followAbstractCreature != null) ? self.followAbstractCreature.realizedCreature : null;
-        if (creature != null && creature is Player && beaconRoom != null && self.room == beaconRoom && tickClock <= 0) {
-            float lifetime = 25f;
-            IntVector2 pos = shortCutBeacon;
-            bool warpAvailable = !CLOptions.warpButton.Value || (CheckBodyCountPreq(self.room) && CheckProxPreq(self.room));
-            float strainMag = warpAvailable ? 40f : 15f;
-            float mult = warpAvailable ? 1f : 1f;
-            self.room.AddObject(new ExplosionSpikes(self.room, pos.ToVector2() * 20f, 15, 15f, lifetime, 5.0f, strainMag, new Color(1f, 1f, 1f, 0.9f * mult)));
-            tickClock = tickMax;
+        if (creature != null && creature is Player slugger && beaconRoom != null && self.room == beaconRoom) {
+            if (tickClock <= 0)
+            {
+                float lifetime = 25f;
+                IntVector2 pos = shortCutBeacon;
+                bool warpAvailable = !CLOptions.warpButton.Value || (CheckBodyCountPreq(self.room) && CheckProxPreq(self.room));
+                float strainMag = warpAvailable ? 40f : 15f;
+                float mult = warpAvailable ? 1f : 1f;
+                self.room.AddObject(new ExplosionSpikes(self.room, pos.ToVector2() * 20f, 15, 15f, lifetime, 5.0f, strainMag, new Color(1f, 1f, 1f, 0.9f * mult)));
+                tickClock = tickMax;
+            }
+            ShowDepartProgressBars(self);
         }
 
         //SAFETY CHECK FOR ANY PLAYERS THAT MAY HAVE BEEN IN A SHORTCUT AS THE GAME PANIC INACTIVATES THE ROOM THEY ARE TRAVELING TO
@@ -1060,7 +1118,7 @@ public partial class CoopLeash : BaseUnityPlugin
             {
                 //THE REALIZED PLAYER IS NULL IIN THIS CASE! BUT THEIR ABSTRACT ROOM SHOULDN'T BE...
                 AbstractCreature absPlayer = self.room.game.Players[i];
-                if (absPlayer.Room != null && absPlayer.realizedCreature == null && !absPlayer.state.dead && RWInput.CheckSpecificButton(i, 11, Custom.rainWorld))
+                if (absPlayer.Room != null && absPlayer.realizedCreature == null && !absPlayer.state.dead && RWInput.CheckSpecificButton(i, 11))
                 {
                     //Debug.Log("RELOAD");
                     self.room.world.ActivateRoom(absPlayer.Room); //RE-LOAD THE ROOM! IN CASE IT WAS INACTIVE
@@ -1079,8 +1137,8 @@ public partial class CoopLeash : BaseUnityPlugin
         if (!zoomEnabled)
             return; //JUST FOR NOW....
         
-        float xLimit = 1100 * ScreenSizeMod().x; //DON'T PUT THE CAMERA MODIFIER ON THIS ONE
-        float yLimit = 600 * ScreenSizeMod().y;
+        float xLimit = ScreenLimit().x * ScreenSizeMod().x; //DON'T PUT THE CAMERA MODIFIER ON THIS ONE
+        float yLimit = ScreenLimit().y * ScreenSizeMod().y; //z
         float baseZoom = baseCameraZoom;  //WE GET THIS FROM SBCAM REMIX SLIDER, IF IT'S ENABLED ON STARTUP. OTHERWISE IT'S JUST 1
         float zoomMod = 1f + Mathf.Max((xExtra - xLimit) / xLimit, (yExtra - yLimit) / yLimit, 0f);
         float zoomLimit = 1f - CLOptions.zoomLimit.Value;
@@ -1223,6 +1281,18 @@ public partial class CoopLeash : BaseUnityPlugin
          
         if (true) //self.cameras.Length > 1)
         {
+            //IN 2 PLAYER SPLITSCREEN MODE, KEEP THE CAMERA NUMBERS CONSISTANT
+            if (TwoPlayerSplitscreenMode())
+            {
+                Player plr1 = self.Players[0].realizedCreature as Player;
+                Player plr2 = self.Players[1].realizedCreature as Player;
+                if (plr1 != null && plr2 != null && plr1.GetCat().defector)
+                {
+                    plr1.GetCat().defector = false;
+                    plr2.GetCat().defector = true;
+                }
+            }
+
             bool splitGroup = false;
             bool unsheltered = false;
             bool shelteredUndefected = false;
@@ -1230,7 +1300,8 @@ public partial class CoopLeash : BaseUnityPlugin
             for (int i = 0; i < self.Players.Count; i++)
             {
                 Player plr = self.Players[i].realizedCreature as Player;
-                if (plr != null && !plr.dead && !plr.GetCat().deniedSplitCam && plr.GetCat().pipeType != "other") //!plr.inShortcut && 
+                //ALSO CHECK FOR DEFECTOR, SO BREAKAWAYS DON'T GET BLINDED AS THEY TRANSITION BETWEEN ROOMS. AND IN 2P SPLITSCREEN MODE IDK THIS JUST WORKS TOO
+                if (plr != null && !plr.dead && !plr.GetCat().deniedSplitCam && (plr.GetCat().pipeType != "other" || plr.GetCat().defector || TwoPlayerSplitscreenMode())) 
                 {
                     //DO WE CHECK BY DISTANCE OR BY ROOM?
 					if (CLOptions.autoSplitScreen.Value || self.Players.Count <= 2) //IF THERE'S ONLY 2 OF US, NO REASON TO NOT USE DISTANCE
@@ -1254,9 +1325,15 @@ public partial class CoopLeash : BaseUnityPlugin
                             unsheltered = true; //AT LEAST ONE PERSON IS RUNNING AROUND OUTSIDE
                         else if (plr.room.shelterDoor != null && !plr.GetCat().defector && !plr.stillInStartShelter)
                             shelteredUndefected = true;
-                    }
-                    
+                    }  
                 }
+                //WE DELAY MOVING THIS 
+                if (plr != null && plr.GetCat().stripMyDeniedSplitcam)
+                {
+                    plr.GetCat().deniedSplitCam = false;
+                    plr.GetCat().stripMyDeniedSplitcam = false;
+                }
+                //VERY SPECIFIC CASE FOR 2-PLAYER SPLITSCREEN MODE. DON'T 
             }
 
 
@@ -1265,7 +1342,9 @@ public partial class CoopLeash : BaseUnityPlugin
                 //null.SplitScreenCoop.SplitScreenCoop.SetSplitMode(SplitScreenCoop.SplitScreenCoop.SplitMode.NoSplit, self);
                 //(Chainloader.PluginInfos["com.henpemaz.splitscreencoop"].Instance as SplitScreenCoop.SplitScreenCoop).SetSplitMode(SplitScreenCoop.SplitScreenCoop.preferedSplitMode, self);
                 //UnityEngine.Object.FindInstanceOfType(SplitScreenCoop.SplitScreenCoop)
-                UnityEngine.Object.FindObjectOfType<SplitScreenCoop.SplitScreenCoop>().SetSplitMode(SplitScreenCoop.SplitScreenCoop.preferedSplitMode, self);
+                //SILLY OPTOMIZATION TIME... IF WE SHOULD SPLIT BUT BOTH OF OUR CAMERA TARGETS ARE ON THE SAME "SCREEN," DON'T SPLIT YET...
+                if (!(self.cameras[0]?.room == self.cameras[1]?.room && self.cameras[0]?.currentCameraPosition == self.cameras[1]?.currentCameraPosition))
+                    UnityEngine.Object.FindObjectOfType<SplitScreenCoop.SplitScreenCoop>().SetSplitMode(SplitScreenCoop.SplitScreenCoop.preferedSplitMode, self);
             }
             else if (!splitGroup && SplitScreenCoop.SplitScreenCoop.CurrentSplitMode != SplitMode.NoSplit)
             {
@@ -1301,7 +1380,16 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
             }
 
-            //OK MAKE SURE NOT EVERYONE IN THE WORLD IS A DEFECTOR
+            //WHY DO WE NEED TO ENFORCE THIS EVERY TICK. WHY COULDNT YOU JUST WORK NORMAL
+            if (TwoPlayerSplitscreenMode() && splitGroup) //IN 2 PLAYER SPLITSCREEN MODE, KEEP THE CAMERA NUMBERS CONSISTANT
+            {
+                Player plr1 = self.Players[0].realizedCreature as Player;
+                Player plr2 = self.Players[1].realizedCreature as Player;
+                if (self.cameras[0]?.followAbstractCreature != plr1?.abstractCreature)
+                    self.cameras[0].ChangeCameraToPlayer(plr1.abstractCreature);
+                if (self.cameras[1]?.followAbstractCreature != plr2?.abstractCreature)
+                    self.cameras[1].ChangeCameraToPlayer(plr2.abstractCreature);
+            }
         }
     }
 
@@ -1341,6 +1429,24 @@ public partial class CoopLeash : BaseUnityPlugin
         return pCount;
     }
 
+    //THIS ONES FOR ALL ROOMS
+    public int UnTubedSlugs(Room room)
+    {
+        if (room == null)
+            return 0;
+
+        int pCount = 0;
+        for (int i = 0; i < room.game.Players.Count; i++)
+        {
+            if (room.game.Players[i].realizedCreature != null
+                && ValidPlayer(room.game.Players[i].realizedCreature as Player)
+                && (room.game.Players[i].realizedCreature as Player).inShortcut == false)
+            {
+                pCount += 1;
+            }
+        }
+        return pCount;
+    }
 
     public int UnTubedSlugsInRoom(Room room) 
     {
@@ -1443,7 +1549,7 @@ public partial class CoopLeash : BaseUnityPlugin
         if (!improvedInputEnabled)
         {
             if (piped)
-                return (RWInput.CheckSpecificButton((player.State as PlayerState).playerNumber, 11, Custom.rainWorld));
+                return (RWInput.CheckSpecificButton((player.State as PlayerState).playerNumber, 11));
             else
                 return player.input[0].mp && !player.input[1].mp;
         }
@@ -1625,33 +1731,57 @@ public partial class CoopLeash : BaseUnityPlugin
 	public static void CleanupDefectors(RainWorldGame myGame)
 	{
         int aliveCount = 0;
+        int defectCount = 0;
+        int sameRoomCount = 1; //SINCE FIRST PLAYER MATCHES THEIR OWN ROOM, OFC
+        string sharedRoom = "";
         for (int i = 0; i < myGame.Players.Count; i++)
         {
             Player plr = myGame.Players[i].realizedCreature as Player;
             if (plr != null && !plr.dead)
             {
                 aliveCount++;
+                if (plr.GetCat().defector)
+                    defectCount++;
+                //CHECK IF EVERYONE IS IN THE SAME ROOM !!AND!! IN THE SAME PIPE
+                if (plr.GetCat().pipeType == "other")
+                {
+                    if (plr.GetCat().lastRoom == sharedRoom)
+                        sameRoomCount++;
+                    else
+                    {
+                        sharedRoom = plr.GetCat().lastRoom;
+                    }
+                }
+                else //GOOFY...
+                    sameRoomCount--;
+                
+                //Debug.Log("CLEANUP DEFECTORS: " + plr.playerState.playerNumber + " - " + plr.GetCat().lastRoom + " - " + plr.GetCat().pipeType);
             }
         }
 
-        //IF ONLY ONE PERSON IS LEFT ALIVE, DEFECT EVERYONE ELSE
-        if (aliveCount == 1)
+        for (int i = 0; i < myGame.Players.Count; i++)
         {
-            for (int i = 0; i < myGame.Players.Count; i++)
+            Player plr = myGame.Players[i].realizedCreature as Player;
+            //Debug.Log("CLEANUP DEFECTORS: " + (defectCount == aliveCount) + " : " + (sameRoomCount == aliveCount) + " : " + (aliveCount == 1));
+            if (plr != null)
             {
-                Player plr = myGame.Players[i].realizedCreature as Player;
-                if (plr != null && !plr.dead)
+                if (!plr.dead)
                 {
-                    plr.GetCat().defector = false;
+                    //UNDEFECT IF: EVERYONE IS DEFECTED | EVERYONE IS IN THE SAME EXIT PIPE | ONLY ONE LIVING PLAYER LEFT
+                    if (defectCount == aliveCount || sameRoomCount == aliveCount || aliveCount == 1)
+                    {
+                        plr.GetCat().defector = false;
+                        defectCount--; //IF EVERYONE WAS DEFECTED, WE ONLY NEED TO TURN ONE. THE REST WILL REJOIN VIA PROXIMITY
+                    }
                 }
-                else if (plr != null)
-                {
+                else
+                { //THEY'RE DEAD. DEFECT THEM
                     plr.GetCat().defector = true;
                 }
             }
         }
-		
-		cleanupDefectorFlag = false;
+
+        cleanupDefectorFlag = false;
 	}
 
 
@@ -1662,7 +1792,7 @@ public partial class CoopLeash : BaseUnityPlugin
         for (int num = self.transportVessels.Count - 1; num >= 0; num--) 
         {
             if (ModManager.CoopAvailable && self.transportVessels[num]?.creature is Player player && !player.isNPC && self.transportVessels[num].room == beaconRoom?.abstractRoom) {
-				bool forceDepart = false;
+				bool forceDepartFlag = false;
                 //IF WE PRESS THE MAP BUTTON, DUMP US OUT WHERE WE STAND! I THINK
                 Room realizedRoom = self.transportVessels[num].room.realizedRoom; //DO WE REALLY NEED TO CHECK IF IT'S AN ENTRANCE?
                 if (realizedRoom != null && realizedRoom.GetTile(self.transportVessels[num].pos).Terrain == Room.Tile.TerrainType.ShortcutEntrance)
@@ -1687,20 +1817,23 @@ public partial class CoopLeash : BaseUnityPlugin
                         }
 
                         //IF WE'RE HOLDING DOWN THE JUMP BUTTON, LET US GO THROUGH PIPES ANYWAYS
-                        if (CLOptions.allowForceDepart.Value && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 0, Custom.rainWorld))
+                        if (CLOptions.allowForceDepart.Value && RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 0))
                         {
                             myPlayer.GetCat().forceDepart++;
-                            if (myPlayer.GetCat().forceDepart > 12)
+                            if (myPlayer.GetCat().forceDepart > 10)
                             {
                                 self.transportVessels[num].wait = 0;
-                                forceDepart = true;
+                                forceDepartFlag = true;
                                 //FORCEFULLY SET THE CAMERA TO US BECAUSE WE PROBABLY WANT IT AND ALSO TO FIX UNLOADED ROOM ISSUES
                                 if (SplitScreenActive() && !MultiScreens() && realizedRoom.game.cameras.Length > 1)
                                 {
-                                    realizedRoom.game.cameras[1].ChangeCameraToPlayer(myPlayer.abstractCreature);
+                                    if (TwoPlayerSplitscreenMode()) //NOT IN 2PSPLITSCREEN. OTHERWISE IT COULD TAKE THE WRONG CAM
+                                        realizedRoom.game.cameras[myPlayer.playerState.playerNumber].followAbstractCreature = myPlayer.abstractCreature; //realizedRoom.game.cameras[myPlayer.playerState.playerNumber].ChangeCameraToPlayer(myPlayer.abstractCreature);
+                                    else
+                                        realizedRoom.game.cameras[1].ChangeCameraToPlayer(myPlayer.abstractCreature);
                                     myPlayer.GetCat().defector = true; //WHY WOULD WE NOT DEFECT??
                                 }
-                                else if (SmartCameraActive() && !splitScreenEnabled) //DON'T FOCUS US IF SPLITSCREEN IS ON. THE 2ND CAM WILL AUTO TARGET US
+                                else if (SmartCameraActive() && !splitScreenEnabled && !spotlightMode) //DON'T FOCUS US IF SPLITSCREEN IS ON. THE 2ND CAM WILL AUTO TARGET US
                                 {
                                     realizedRoom.game.cameras[0].ChangeCameraToPlayer(myPlayer.abstractCreature);
                                     //myPlayer.GetCat().defector = true; //MAYBE WE DON'T NEED TO DO THIS?...
@@ -1714,6 +1847,16 @@ public partial class CoopLeash : BaseUnityPlugin
                         }
                         else if (myPlayer.GetCat().forceDepart > 0)
                             myPlayer.GetCat().forceDepart = 0; //DECAY THE VALUE IF NOT HOLDING IT
+
+                        //PEOPLE DON'T READ THE INSTRUCTIONS. IF THEY'RE PRESSING RANDOM BUTTONS WHILE WAITING IN A PIPE, REMIND THEM OF THE CONTROLS...
+                        if (!shownHudHint && (RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 3) || RWInput.CheckSpecificButton((myPlayer.State as PlayerState).playerNumber, 4)))
+                        {
+                            string msg = realizedRoom.game.rainWorld.inGameTranslator.Translate("Tapping the MAP button again will exit the pipe");
+                            if (CLOptions.allowForceDepart.Value)
+                                msg += ". Or " + realizedRoom.game.rainWorld.inGameTranslator.Translate("Hold JUMP in a pipe to depart without waiting for other players");
+                            realizedRoom.game.cameras[0].hud.textPrompt.AddMessage(msg, 0, 200, false, false);
+                            shownHudHint = true;
+                        }
                     }
 				}
 
@@ -1735,7 +1878,7 @@ public partial class CoopLeash : BaseUnityPlugin
                     }
 
                     //AS LONG AS THERE IS A PLAYER LEFT IN THE ROOM, DON'T DEPART
-                    if (CLOptions.waitForAll.Value && othersInRoom > 0 && !forceDepart)
+                    if (CLOptions.waitForAll.Value && othersInRoom > 0 && !forceDepartFlag)
                     {
 
                         if (shortCutBeacon != new IntVector2(0, 0) && room.MiddleOfTile(self.transportVessels[num].pos) == room.MiddleOfTile(shortCutBeacon))
@@ -1824,12 +1967,34 @@ public partial class CoopLeash : BaseUnityPlugin
 
             //IF WE HAVE "WAIT FOR EVERYONE" DISABLED (FOR SOME GOD UNKOWN REASON) WE NEED TO DEFECT THE MOMENT WE ENTER A PIPE
             if (CLOptions.waitForAll.Value == false)
+            {
+                //if (!player.GetCat().defector) //DON'T DENY THE SPLITCAM IF WE ARE ALREADY A DEFECTOR. WE WANT OUR SPLITCAM TO STAY ACTIVE IN THE PIPE
+                //    player.GetCat().deniedSplitCam = true;
+                //OKAY WE DON'T NEED THAT BIT ANYMORE. WE JUST WON'T SPLIT WHILE CAMERAS ON THE SAME "SCREEN"
                 player.GetCat().defector = true;
+                cleanupDefectorFlag = true; //FOR GOOD MEASURE -OKAY FORGET YOU YOU SUCK
+                //WE NEED TO HAND CAMERA TO THE FIRST PERSON WHO ENTERED THE EXIT PIPE
+                if (TubedSlugs(player.room) == 0)
+                {
+                    player.GetCat().firstInAPipe = true;
+                    //Debug.Log("FIRST TUBED SLUG!");
+                }
+                if (UnTubedSlugs(player.room) == 1)
+                {
+                    //Debug.Log("LAST TUBED SLUG!");
+                    for (int i = 0; i < player.room.game.Players.Count; i++)
+                    {
+                        Player plr = player.room.game.Players[i].realizedCreature as Player;
+                        if (plr != null && plr.GetCat().firstInAPipe)
+                            self.room.game.cameras[0].followAbstractCreature = plr.abstractCreature;
+                    }
+                }
+            }
         }
         orig(self, entrancePos, carriedByOther);
         //AND THEN ShortcutHandler.SuckInCreature RUNS (THE ONE UNDER US)
 
-        
+
     }
 
     private void Creature_SpitOutOfShortCut(On.Creature.orig_SpitOutOfShortCut orig, Creature self, IntVector2 pos, Room newRoom, bool spitOutAllSticks)
@@ -1841,9 +2006,10 @@ public partial class CoopLeash : BaseUnityPlugin
             player.GetCat().pipeType = "untubed";
 			player.GetCat().lastRoom = newRoom.roomSettings.name;
             player.GetCat().leavingStation = 0;
-            player.GetCat().deniedSplitCam = false;
+            player.GetCat().stripMyDeniedSplitcam = true;
             player.GetCat().departedFromAltExit = false;
-            //IF A SHORTCUT BEACON EXISTS AND WE ARE NOT IN THE SAME ROOM, WE SHOULD BE A DEFECTOR. OR IF WE ARE IN THE JAWS OF A CREATURE
+            player.GetCat().firstInAPipe = false;
+            //IF WE ARE IN THE JAWS OF A CREATURE, WE SHOULD BE A DEFECTOR
             if (player.dangerGrasp != null) //(splitScreenEnabled && beaconRoom != null && beaconRoom != newRoom) //WE HANDLE THIS ELSEWHERE NOW, HOPEFULLY
                 player.GetCat().defector = true;
 
@@ -1853,22 +2019,22 @@ public partial class CoopLeash : BaseUnityPlugin
 
     //APPARENTLY THIS DOES NOT RUN FOR CREATURES GETTING CARRIED INTO A SHORTCUT BY ANOTHER CREATURE. KEEP THAT IN MIND
     //HERES THE ORDER: SUCKINCREATURE IS CALLED ON THE MAIN CREATURE. THEN, AFTER THAT IS DONE, IT SETS Creature.inShortcut = true FOR ALL CONNECTED OBJECTS
-    private void ShortcutHandler_SuckInCreature(On.ShortcutHandler.orig_SuckInCreature orig, ShortcutHandler self, Creature creature, Room room, ShortcutData shortCut) {
-
-        
+    private void ShortcutHandler_SuckInCreature(On.ShortcutHandler.orig_SuckInCreature orig, ShortcutHandler self, Creature creature, Room room, ShortcutData shortCut) 
+    {
         bool validShortType = shortCut.shortCutType == ShortcutData.Type.RoomExit; // || shortCut.shortCutType == ShortcutData.Type.Normal;
         if (CLOptions.waitForAll.Value && creature is Player player && !player.isNPC && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount > 1 && validShortType) {
 
             //!!!! FOR THIS TO WORK! WE NEED TO TAKE INTO ACCOUNT ALL SLUGCATS THAT WERE ON OUR BACK AS WE ENTER THIS PIPE, SINCE THE GAME WON'T SEE THEM AS "IN A PIPE" YET
-
             //DO NOT ACTIVATE UNLESS THERE ARE OTHER SLUGCATS IN THE ROOM. AND DEACTIVATE IF WE'RE THE LAST ONE
             int othersInRoom = 0;
 			int slugsInPipe = 1; //it's us
 			//HERE THIS VERSION CHECKS ALL PLAYERS, NOT JUST PLAYERS IN THE ROOOM (SINCE I BELEIVE PLAYERS IN SHORTCUTS NO LONGER COUNT AS IN THE ROOM)
 			for (int i = 0; i < room.game.Players.Count; i++)
             {
-                if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != creature && sluggo.room == creature.room)
-				{
+                //Player sluggor = room.game.Players[i].realizedCreature as Player;
+                //Debug.Log("FLAG 1 " + ValidPlayer(sluggor) + " : " + (sluggor != creature) + " : " + (sluggor.GetCat().lastRoom == player.GetCat().lastRoom));
+                if (room.game.Players[i].realizedCreature != null && room.game.Players[i].realizedCreature is Player sluggo && ValidPlayer(sluggo) && sluggo != creature && sluggo.GetCat().lastRoom == player.GetCat().lastRoom) //creature.room -CHECK LASTROOM SINCE IT CHANGED AS WE ENTERED THIS PIPE. ALSO NULL WHEN IN SHORTCUTS? THE NAME AT LEAST...
+                {
 					Player slug = sluggo;
 					while (slug.onBack != null) //ARE WE ON SOMEONES BACK?
 					{
@@ -1878,7 +2044,7 @@ public partial class CoopLeash : BaseUnityPlugin
 					{
 						slug = PlayerHoldingMe(slug); //THAT'S HIM OFFICER
 					}
-                    //Debug.Log("PIPE TIME " + sluggo.playerState.playerNumber + " : " + sluggo.GetCat().lastRoom + " : " + (beaconRoom == null || sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name) + " - " + (slug.inShortcut || slug == creature));
+                    //Debug.Log("PIPE TIME " + sluggo.playerState.playerNumber + " : " + slug.GetCat().pipeType + " : " + sluggo.GetCat().lastRoom + " : " + (beaconRoom == null || sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name) + " - " + (slug.inShortcut || slug == creature));
                     //NOW!... IS WE IN THE PIPE OR NOT
                     if ((slug.GetCat().pipeType == "other" || slug == creature) && (beaconRoom == null || sluggo.GetCat().lastRoom == beaconRoom.roomSettings.name)) //WE CHECK FOR == CREATURE BECAUSE THEY ARE THE ONES ENTERING THE PIPE (but arent inShortcut yet)
 						slugsInPipe++;
@@ -1980,9 +2146,32 @@ public partial class CoopLeash : BaseUnityPlugin
         }
         orig(self, pos, creature, room, wait);
     }
-	
-	
-    
+
+
+    public static void ShowDepartProgressBars(RoomCamera self)
+    {
+        int highestForceDepart = 0;
+        Color color = Color.white;
+        for (int i = 0; i < self.room.game.Players.Count; i++)
+        {
+            Player plr = self.room.game.Players[i].realizedCreature as Player;
+            if (plr != null && plr.inShortcut && plr.GetCat().forceDepart > highestForceDepart)
+            {
+                highestForceDepart = plr.GetCat().forceDepart;
+                color = PlayerGraphics.JollyColor(plr.playerState.playerNumber, 0);
+            }
+        }
+        if (highestForceDepart > 0)
+        {
+            IntVector2 pos = shortCutBeacon;
+            Vector2 barSize = new Vector2((2 + highestForceDepart) * 2f, 5);
+            self.room.AddObject(new ScreenGraphicDot(pos.ToVector2() * 20f, barSize, color));
+            //Debug.Log("BARSIZE " + barSize.x);
+        }
+    }
+
+
+
     private void RainWorldGameOnShutDownProcess(On.RainWorldGame.orig_ShutDownProcess orig, RainWorldGame self)
     {
         orig(self);
@@ -2006,6 +2195,65 @@ public partial class CoopLeash : BaseUnityPlugin
     #endregion
 }
 
+//NEW GRAPHIC
+public class ScreenGraphicDot : CosmeticSprite
+{
+    public ScreenGraphicDot(Vector2 pos, Vector2 size, Color color)
+    {
+        this.lastPos = pos;
+        this.pos = pos + new Vector2 (0, 25f);
+        this.life = 2f;
+        this.size = size;
+        this.color = color;
+    }
+
+    public override void Update(bool eu)
+    {
+        base.Update(eu);
+        this.life -= 1f;
+        if (this.life < 0f)
+        {
+            this.Destroy();
+        }
+    }
+
+    public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
+    {
+        sLeaser.sprites = new FSprite[1];
+        sLeaser.sprites[0] = new FSprite("pixel", true);
+        sLeaser.sprites[0].color = this.color; // Color.white;
+        sLeaser.sprites[0].scaleX = this.size.x;
+        sLeaser.sprites[0].scaleY = this.size.y;
+        this.AddToContainer(sLeaser, rCam, rCam.ReturnFContainer("Foreground")); //Midground
+    }
+
+    public override void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
+    {
+        sLeaser.sprites[0].x = Mathf.Lerp(this.lastPos.x, this.pos.x, timeStacker) - camPos.x;
+        sLeaser.sprites[0].y = Mathf.Lerp(this.lastPos.y, this.pos.y, timeStacker) - camPos.y;
+
+        //LETS TINKER WITH THIS A BIT. MAYBE THEY'D LOOK BETTER AS ALL PIXELS
+        //sLeaser.sprites[0].element = Futile.atlasManager.GetElementWithName("pixel");
+        //sLeaser.sprites[0].color = new Color(1f, 1f, 1f);
+
+        base.DrawSprites(sLeaser, rCam, timeStacker, camPos);
+    }
+
+    public override void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette)
+    {
+    }
+
+    public override void AddToContainer(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, FContainer newContatiner)
+    {
+        base.AddToContainer(sLeaser, rCam, newContatiner);
+    }
+
+    public float life;
+    public Color color;
+    public Vector2 size;
+}
+
+
 public static class PipeStatusClass
 {
     public class PipeStatus
@@ -2025,6 +2273,8 @@ public static class PipeStatusClass
         public int justDefected; //GIVE THE CAMERA A FEW TICKS TO MOVE OUT OF RANGE OF THE NEWLY ADDED DEFECTOR SO THEY DON'T GET ADDED BACK IN ON THE SAME TICK
         public bool departedFromAltExit; //TO HANDLE AN EXCEPTION WHERE EVERY OTHER PLAYER WAS WAITING IN THE WARP PIPE AND THE LAST PLAYER ENTERS A DIFFERENT PIPE
         public Vector2 bodyPosMemory; //REMEMBER WHERE THIS PLAYER WAS BEFORE WE TELEPORT THEM FOR CAMERASCROLL
+        public bool firstInAPipe;
+        public bool stripMyDeniedSplitcam;
 
         public PipeStatus()
         {
