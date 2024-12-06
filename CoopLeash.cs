@@ -564,7 +564,7 @@ public partial class CoopLeash : BaseUnityPlugin
 
     public static bool TwoPlayerSplitscreenMode()
     {
-        return (splitScreenEnabled && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount >= 2);
+        return (splitScreenEnabled && ModManager.CoopAvailable && Custom.rainWorld.options.JollyPlayerCount == 2);
     }
 
     public static bool TwoPlusPlayerSplitscreenMode()
@@ -1369,13 +1369,12 @@ public partial class CoopLeash : BaseUnityPlugin
                 for (int i = 0; i < self.Players.Count; i++)
                 {
                     Player plr = self.Players[i].realizedCreature as Player;
-                    if (plr != null && !plr.dead)
+                    if (plr != null && !plr.dead && plr.room != null)
                     {
                         if (plr.room.shelterDoor == null)
                             plr.GetCat().defector = false;
                         else
                             plr.GetCat().defector = true;
-                        //plr.GetCat().defector
                     }
                 }
             }
