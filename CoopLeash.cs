@@ -1998,7 +1998,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 player.GetCat().defector = true;
                 cleanupDefectorFlag = true; //FOR GOOD MEASURE -OKAY FORGET YOU YOU SUCK
                 //WE NEED TO HAND CAMERA TO THE FIRST PERSON WHO ENTERED THE EXIT PIPE
-                if (TubedSlugs(player.room) == 0)
+                if (TubedSlugs(player.room) == 0 && !(splitScreenEnabled && CheckIfDualDisplays())) //DON'T DO THIS IN DUAL-DISPLAY MODE OR IT'LL STEAL THE OTHER PERSONS CAMERA FOREVER
                 {
                     player.GetCat().firstInAPipe = true;
                     //Debug.Log("FIRST TUBED SLUG!");
@@ -2017,8 +2017,6 @@ public partial class CoopLeash : BaseUnityPlugin
         }
         orig(self, entrancePos, carriedByOther);
         //AND THEN ShortcutHandler.SuckInCreature RUNS (THE ONE UNDER US)
-
-
     }
 
     private void Creature_SpitOutOfShortCut(On.Creature.orig_SpitOutOfShortCut orig, Creature self, IntVector2 pos, Room newRoom, bool spitOutAllSticks)
