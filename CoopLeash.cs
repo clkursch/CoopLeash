@@ -97,6 +97,10 @@ public partial class CoopLeash : BaseUnityPlugin
         }
     }
 
+    public static IntVector2 shortCutBeacon = new IntVector2(0, 0);
+    public static Room beaconRoom;
+    public static int groupFocusCount = 0;
+
     public static bool rotundWorldEnabled = false;
 	public static bool camScrollEnabled = false;
 	public static bool swallowAnythingEnabled = false;
@@ -217,8 +221,8 @@ public partial class CoopLeash : BaseUnityPlugin
             On.Lizard.Update += Lizard_Update;
             On.DeathFallGraphic.InitiateSprites += DeathFallGraphic_InitiateSprites;
             On.DeathFallGraphic.DrawSprites += DeathFallGraphic_DrawSprites;
-
             On.Player.PickupCandidate += Player_PickupCandidate;
+            On.Watcher.WarpPoint.NewWorldLoaded_Room += WarpPoint_NewWorldLoaded_Room;
 
             On.JollyCoop.JollyHUD.JollyMeter.Draw += JollyMeter_Draw;
             On.JollyCoop.JollyHUD.JollyPlayerSpecificHud.JollyPlayerArrow.Draw += JollyPlayerArrow_Draw;
@@ -283,6 +287,11 @@ public partial class CoopLeash : BaseUnityPlugin
 	public static bool SplitScreenActive()
     {
         return (SmartCameraActive() && splitScreenEnabled);
+    }
+
+    public static bool CheckIfDualDisplays()
+    {
+        return SplitScreenCoop.SplitScreenCoop.dualDisplays && SplitScreenCoop.SplitScreenCoop.DualDisplaySupported(); //I GUESS THE FIRST ONE WOULD BE FALSE ANYWAYS BUT JUST TO BE SURE
     }
 
     private void GlobalRain_Update(On.GlobalRain.orig_Update orig, GlobalRain self)
@@ -779,301 +788,303 @@ public partial class CoopLeash : BaseUnityPlugin
         AbstractCreature swapFollower = null;
         groupFocusCount = 0;
 
-        if (SmartCameraActive() && ModManager.CoopAvailable && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null && self.room.abstractRoom == self.followAbstractCreature.Room)
-        {
+        if (!(splitScreenEnabled && CheckIfDualDisplays())) //IF THE FUNKY SPLITSCREEN DUAL MONITOR MODE IS ENABLED, JUST DON'T TOUCH CAMERA STUFF
+        { 
+            if (SmartCameraActive() && ModManager.CoopAvailable && !self.voidSeaMode && self.followAbstractCreature != null && self.followAbstractCreature.realizedCreature != null && self.followAbstractCreature.realizedCreature is Player && self.room != null && self.room.abstractRoom == self.followAbstractCreature.Room)
+            {
             
-			if (splitScreenEnabled)
-			{
-                //FOR SPLITSCREEN, ALL NON-MAIN CAMERAS SHOULD ONLY FOCUS ON DEFECTORS
-                if (self.cameraNumber > 0)
-                {
-                    if (!(self.followAbstractCreature.realizedCreature as Player).GetCat().defector)
+			    if (splitScreenEnabled)
+			    {
+                    //FOR SPLITSCREEN, ALL NON-MAIN CAMERAS SHOULD ONLY FOCUS ON DEFECTORS
+                    if (self.cameraNumber > 0)
                     {
-                        //CHECK HOW MANY DEFECTORS WE HAVE.
-                        int strike = self.cameraNumber - 1;
+                        if (!(self.followAbstractCreature.realizedCreature as Player).GetCat().defector)
+                        {
+                            //CHECK HOW MANY DEFECTORS WE HAVE.
+                            int strike = self.cameraNumber - 1;
+                            for (int i = 0; i < self.room.game.Players.Count; i++)
+                            {
+                                Player plr = self.room.game.Players[i].realizedCreature as Player;
+                                if (plr != null && !plr.dead && !plr.inShortcut && plr.GetCat().defector)
+                                {
+                                    if (strike > 0)
+                                        strike--;
+                                    else
+                                    {
+                                        //Debug.Log("CHANGING CAMERA TO PLAYER " + plr.ToString());
+                                        self.ChangeCameraToPlayer(plr.abstractCreature);
+                                        //SBCameraZoom(self, 0f, 0f); //SET OUR ZOOM TO 1
+                                    }
+                                }
+                            }
+                        } 
+                        //WE ALWAYS UPDATE ZOOM (BECAUSE WE NEED TO INHERIT CAM[0]'S ZOOM LEVEL)
+                        SBCameraZoom(self, 0f, 0f); //RUNNING THIS AS ANYTHING OTHER THAN MAIN CAM JUST SETS ZOOM LEVEL TO MAIN CAM'S LEVEL
+                        orig(self); //OKAY JUST RUN ORIG AND BE DONE
+                        return;
+                    }
+
+                    //MAKE SURE MAIN CAM IS NOT FOLLOWING A DEFECTOR (OR DEAD PLAYER), IF ABLE
+                    if (!TwoPlayerSplitscreenMode() && self.cameraNumber == 0 && ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector))// || (self.followAbstractCreature.realizedCreature as Player).dead))
+                    {
+                        //Debug.Log("CHECKING MAIN CAM");
+                        bool foundTarget = false;
                         for (int i = 0; i < self.room.game.Players.Count; i++)
                         {
                             Player plr = self.room.game.Players[i].realizedCreature as Player;
-                            if (plr != null && !plr.dead && !plr.inShortcut && plr.GetCat().defector)
+                            if (plr != null && !plr.dead && !plr.inShortcut && !plr.GetCat().defector)
                             {
-                                if (strike > 0)
-                                    strike--;
-                                else
+                                self.ChangeCameraToPlayer(plr.abstractCreature);
+                                foundTarget = true;
+                                //Debug.Log("FIXING MAIN CAM");
+                            }
+                        }
+                        if (!foundTarget)
+                        {
+                            Debug.Log("OKAY EVERYONE HERE IS EITHER DEAD OR A DEFECTOR, SO YOU ARE THE NEW GROUP LEADER");
+                            //BUT FIRST, DEFECT EVERYONE ELSE. WE CAN'T HAVE ALL NON-DEFECTORS IN SEPERATE ROOMS
+                            for (int i = 0; i < self.room.game.Players.Count; i++) //ACTUALLY WE MIGHT NOT HAVE EVEN NEEDED THIS PART BUT IT MAKES SENSE SO IM LEAVING IT IN
+                            {
+                                Player plr = self.room.game.Players[i].realizedCreature as Player;
+                                if (plr != null) //CHECK FOR NULL DUMMY
+                                    plr.GetCat().defector = true;
+                            }
+                            (self.followAbstractCreature.realizedCreature as Player).GetCat().defector = false;
+                        }
+                    }
+                
+                    //DO NOT ALLOW SPOTLIGHT MODE IF MULTIPLE SCREENS ARE ACTIVE, THAT'S MEAN (UNLESS ITS FOR A DEFECTOR)
+                    if (self.cameraNumber == 0 && !(self.followAbstractCreature.realizedCreature as Player).GetCat().defector && MultiScreens())
+                        spotlightMode = false;
+                }
+			
+			
+			
+			
+			    origFollorCrit = self.followAbstractCreature;
+                origBodyPos = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
+			    origBodyPos2 = self.followAbstractCreature.realizedCreature.bodyChunks[1].pos;
+				
+			    //IF WE'RE FOLLOWING A DEFECTOR, IT'S ALWAYS A SPOTLIGHT
+			    if ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector)
+				    spotlightMode = true;
+
+                //THIS CHUNK IS REJOINING THE NON-SPOTLIGHT RUNNING BECAUSE FORCED DEFECTOR SPOTLIGHTS SHOULD CHECK TO AUTO REJOING
+                float maxLeft = spotlightMode ? float.MaxValue : origBodyPos.x;
+                float maxRight = spotlightMode ? 0f : origBodyPos.x;
+                float maxDown = spotlightMode ? float.MaxValue : origBodyPos.y;
+                float maxUp = spotlightMode ? 0f : origBodyPos.y;
+			    float totalX = 0f;
+			    float totalY = 0f;
+			    int totalCnt = 0;
+                int unPiped = 0;
+			    //CHECK EACH VECTOR TO SEE WHO IS AT THE FURTHEST CORNERS
+			    for (int i = 0; i < self.room.game.Players.Count; i++)
+			    {
+				    Player plr = self.room.game.Players[i].realizedCreature as Player;
+				    if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room)
+				    {
+					    //IF WE'RE A DEFECTOR, CHECK TO SEE IF WE CAN REJOIN THE GROUP REAL QUICK
+					    if (plr.GetCat().defector && plr.GetCat().justDefected <= 0 
+                            && plr.room == GetFirstUndefectedPlayer(self.room.game)?.room //ALSO, WE CAN'T REJOIN IF WE AREN'T IN THE SAME ROOM, DUMBO //self.room.game.cameras[0].room
+                            && plr.GetCat().pipeType != "other") //DON'T TRACK IN SHORTCUTS, SINCE IT SEEMS THE GAME WILL CHECK YOUR POSITION FROM THE PREVIOUS ROOM. SNEAKY LITTLE SHITE...
+					    {
+                            //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325)
+                            //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f * 2f * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325 * 2f * (1f / GetWidestCameraZoom())) //self.lastPos
+                            //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f * 2f * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325 * 2f * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y)
+                            //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 1300 && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 700) //I GIVE UP... THIS IS THE BEST I CAN DO
+                            //OKAY IT'S NOT PERFECT, I THINK SOME OF THESE VALUES NEED TO BE MULTIPLIED BY THE GETWIDESTCAMERAZOOM MODIFIER AS WELL, BUT IT'S WAAAY BETTER THAN IT USED TO BE
+                            if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < (GetRejoinMargins(ScreenLimit().x * ScreenSizeMod().x) - (xDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < (GetRejoinMargins(ScreenLimit().y * ScreenSizeMod().y) - (yDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()))
+                            {
+                                plr.GetCat().defector = false;
+                                Debug.Log("UNDEFECTING " + plr.playerState.playerNumber);
+                                //IF WE HAD BEEN FORCED OUT OF OUR GROUP, WE CAN AUTO-REJOIN OUT OF SPOTLIGHT MODE
+                                if (plr.GetCat().forcedDefect && spotlightMode)
                                 {
-                                    //Debug.Log("CHANGING CAMERA TO PLAYER " + plr.ToString());
-                                    self.ChangeCameraToPlayer(plr.abstractCreature);
-                                    //SBCameraZoom(self, 0f, 0f); //SET OUR ZOOM TO 1
+                                    spotlightMode = false;
+                                    plr.GetCat().forcedDefect = false;
+                                    plr.GetCat().camProtection = 40;
+                                }
+                            
+                                //IF THE OFF-CAMERA FROM SPLITSCREEN WAS FOCUSED ON US, UN-SPLIT THE CAMERAS. YES WE NEED TO DO THIS RIGHT NOW OTHERWISE IT WILL MESS UP THE DEFECTOR CALCULATIONS BELOW
+                                if (SplitScreenActive() && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == plr)
+                                {
+                                    SplitscreenUpdate(self.room?.game);
+                                }
+                            }
+					    }
+
+                        //SKIP THIS CHECK IF WE ARE TRANSITIONING BETWEEN ROOMS. OUR UPDATES ARE STILL FROM THE PREVIOUS ROOM
+                        //NEW RULE! IN SPOTLIGHT MODE, THE SPOTLIGHTED PLAYER IS EXEMPT FROM THIS CALCULATION (SO THEIR MOVEMENT DOESN'T DEFECT OTHER PLAYERS WAITING IN THE MAIN GROUP
+                        if (!plr.GetCat().defector && plr.GetCat().pipeType != "other" && plr.mainBodyChunk != null) 
+					    {
+						    Vector2 plrPos = plr.mainBodyChunk.pos;
+						    if (plrPos.x < maxLeft)
+							    maxLeft = plrPos.x;
+						    if (plrPos.x > maxRight)
+							    maxRight = plrPos.x;
+						    if (plrPos.y < maxDown)
+							    maxDown = Mathf.Max(plrPos.y, 0); //DON'T PAN INTO DEATH PITS
+						    if (plrPos.y > maxUp)
+							    maxUp = plrPos.y;
+								
+						    //KEEP TRACK OF THESE STATS. WE'LL AVERAGE OUT THE POSITIONS OF EVERYONE SHORTLY
+                            //ACTUALLY, SPOTLIGHTED PLAYERS CAN RUN THE ABOVE STUFF SO THEY STILL GET DEFECTED BUT THEY WON'T CONTRIBUTE TOWARDS THE GROUP AVERAGE POSITION
+                            if (!(spotlightMode && self.followAbstractCreature == plr.abstractCreature))
+                            {
+                                totalX += plrPos.x;
+                                totalY += plrPos.y;
+                                totalCnt++;
+                            }
+                            //Debug.Log("WHO THIS? " + plr.playerState.playerNumber + " - " + plrPos);
+                        }
+
+                        //if ((spotlightMode && self.followAbstractCreature == plr.abstractCreature))
+                            //Debug.Log("THAT'S MEEE " + plr.GetCat().defector + " - " + plr.GetCat().pipeType + " - " + !(spotlightMode && self.followAbstractCreature == plr.abstractCreature));
+
+                        if (plr.GetCat().pipeType != "normal") //!plr.inShortcut
+                        {
+                            unPiped++; //KEEP TRACK OF THIS. WE NEED TO KNOW IF IT'S 0
+                        }
+                    }
+			    }
+                groupFocusCount = totalCnt;
+                //Debug.Log("CAM STATS " + " FOLLOW: " + self.followAbstractCreature.realizedCreature + " - ROOM: " + self.followAbstractCreature.Room.name);
+
+                //FIND THE HIGHEST PLAYER ON SCREEN
+                if (self.room.abstractRoom == self.followAbstractCreature.Room) //OKAY APPARENTLY THE GAME WILL TRY AND RUN THIS WHILE self.room.abstractRoom DOES NOT MATCH self.followAbstractCreature WHICH IS SUPER WEIRD
+                {
+                    for (int i = 0; i < self.room.game.Players.Count; i++)
+                    {
+                        Player plr = self.room.game.Players[i].realizedCreature as Player;
+                        if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut && !plr.GetCat().defector)
+                        {
+                            if (unPiped > 0 && (plr.mainBodyChunk.pos.y == maxUp) && maxUp > origBodyPos.y + 50)//self.followAbstractCreature.pos.y < maxUp - 50) //REMEMBER THIS CREATURE, WE MIGHT NEED TO SWAP TO THEM LATER
+                            {
+                                swapFollower ??= plr.abstractCreature; //OH IT CAN'T BE JUST ANY CREATURE. IT NEEDS TO BE THE HIGHEST CREATURE, I THINK...
+                                //Debug.Log("SWAP " + plr.mainBodyChunk.pos.y + " FOLLOW: " + origBodyPos.y + " - ROOM: " + self.room.game.Players[i].Room.name);
+                            }
+                        }
+                    }
+                }
+
+
+                //SKIP THE REST OF THIS CHECK IF EVERYONE IS IN A SHORTCUT. JUST RUN IT AS NORMAL
+                if (unPiped != 0)  //!spotlightMode
+                {
+
+                    //IF WE'RE FOCUSED ON SOMEONE IN A PIPE, QUICKLY SWITCH IT TO THE FIRST AVAILABLE NON-PIPE PLAUER
+                    if ((self.followAbstractCreature.realizedCreature as Player).inShortcut && !(TwoPlayerSplitscreenMode() && MultiScreens())) //EXCEPT IF THE SCREEN IS SPLIT IN 2P SPLITSCREEN MODE
+                    {
+                        for (int i = 0; i < self.room.game.Players.Count; i++)
+                        {
+                            Player plr = self.room.game.Players[i].realizedCreature as Player;
+                            if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut)
+                                swapFollower ??= plr.abstractCreature; //LITERALLY JUST ANYONE. THE GAME CAN SORT IT OUT NEXT TICK IF THAT'S A PROBLEM
+                        }
+                    }
+
+                    if (SmartCameraActive()) //camScrollEnabled
+                    {
+                        if (unPiped == 1 || spotlightMode) // || MultiScreens()) //WE SKIP SOME OF THE IMPORTANT MAXLEFT/RIGHT CALCULATIONS IN SPOTLIGHT MODE, OOPS
+                            SBCameraZoom(self, 0f, 0f);
+                        else
+                            SBCameraZoom(self, Mathf.Abs(maxLeft - maxRight), Mathf.Abs(maxUp - maxDown));
+                    }
+
+                    //Debug.Log("RUNNING THE THING " + maxLeft + " - " + maxRight + " - " + maxUp + " - " + maxDown + " - ");
+
+                    //CHECK FOR DEFECTORS, PLAYERS WHO HAVE STRAYED TOO FAR FROM THE GROUP AVERAGE IN EITHER THE X OR Y AXIS
+                    float avgX = totalX / totalCnt;
+                    float avgY = totalY / totalCnt;
+                    Player mostBehindPlayer = null;
+                    float mostBehind = 0;
+                    float xLimit = (ScreenLimit().x * marginsMult) * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x; //1300
+                    float yLimit = (ScreenLimit().y * marginsMult) * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y; //700
+                    xDistanceMemory = Mathf.Abs(maxLeft - maxRight);
+                    yDistanceMemory = Mathf.Abs(maxUp - maxDown);
+
+                    //X LIMIT
+                    if (Mathf.Abs(maxLeft - maxRight) > xLimit)
+                    {
+                        for (int i = 0; i < self.room.game.Players.Count; i++)
+                        { //DO IT AGAIN....
+                            Player plr = self.room.game.Players[i].realizedCreature as Player;
+                            if (plr != null && plr.GetCat().camProtection <= 0 && !plr.GetCat().defector && self.room?.abstractRoom == self.room.game.Players[i].Room)
+                            {
+                                float myBehind = Mathf.Abs(plr.mainBodyChunk.pos.x - avgX);
+                                if (plr.GetCat().pipeType == "other" || plr.dangerGraspTime > 30 || plr.dead)
+                                    myBehind *= 1.35f; //PLAYERS THAT ARE GRABBED OR IN A SHORTCUT GET HIGHER PRIORITY FOR BEING CHOSEN AS DEFECTOR
+                                if (myBehind > mostBehind)
+                                {
+                                    mostBehindPlayer = plr;
+                                    mostBehind = myBehind;
                                 }
                             }
                         }
-                    } 
-                    //WE ALWAYS UPDATE ZOOM (BECAUSE WE NEED TO INHERIT CAM[0]'S ZOOM LEVEL)
-                    SBCameraZoom(self, 0f, 0f); //RUNNING THIS AS ANYTHING OTHER THAN MAIN CAM JUST SETS ZOOM LEVEL TO MAIN CAM'S LEVEL
-                    orig(self); //OKAY JUST RUN ORIG AND BE DONE
-                    return;
-                }
-
-                //MAKE SURE MAIN CAM IS NOT FOLLOWING A DEFECTOR (OR DEAD PLAYER), IF ABLE
-                if (!TwoPlayerSplitscreenMode() && self.cameraNumber == 0 && ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector))// || (self.followAbstractCreature.realizedCreature as Player).dead))
-                {
-                    //Debug.Log("CHECKING MAIN CAM");
-                    bool foundTarget = false;
-                    for (int i = 0; i < self.room.game.Players.Count; i++)
-                    {
-                        Player plr = self.room.game.Players[i].realizedCreature as Player;
-                        if (plr != null && !plr.dead && !plr.inShortcut && !plr.GetCat().defector)
-                        {
-                            self.ChangeCameraToPlayer(plr.abstractCreature);
-                            foundTarget = true;
-                            //Debug.Log("FIXING MAIN CAM");
-                        }
                     }
-                    if (!foundTarget)
+                    //Y LIMIT
+                    else if (Mathf.Abs(maxUp - maxDown) > yLimit)
                     {
-                        Debug.Log("OKAY EVERYONE HERE IS EITHER DEAD OR A DEFECTOR, SO YOU ARE THE NEW GROUP LEADER");
-                        //BUT FIRST, DEFECT EVERYONE ELSE. WE CAN'T HAVE ALL NON-DEFECTORS IN SEPERATE ROOMS
-                        for (int i = 0; i < self.room.game.Players.Count; i++) //ACTUALLY WE MIGHT NOT HAVE EVEN NEEDED THIS PART BUT IT MAKES SENSE SO IM LEAVING IT IN
-                        {
+                        for (int i = 0; i < self.room.game.Players.Count; i++)
+                        { //DO IT AGAIN....
                             Player plr = self.room.game.Players[i].realizedCreature as Player;
-                            if (plr != null) //CHECK FOR NULL DUMMY
-                                plr.GetCat().defector = true;
-                        }
-                        (self.followAbstractCreature.realizedCreature as Player).GetCat().defector = false;
-                    }
-                }
-                
-                //DO NOT ALLOW SPOTLIGHT MODE IF MULTIPLE SCREENS ARE ACTIVE, THAT'S MEAN (UNLESS ITS FOR A DEFECTOR)
-                if (self.cameraNumber == 0 && !(self.followAbstractCreature.realizedCreature as Player).GetCat().defector && MultiScreens())
-                    spotlightMode = false;
-            }
-			
-			
-			
-			
-			origFollorCrit = self.followAbstractCreature;
-            origBodyPos = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
-			origBodyPos2 = self.followAbstractCreature.realizedCreature.bodyChunks[1].pos;
-				
-			//IF WE'RE FOLLOWING A DEFECTOR, IT'S ALWAYS A SPOTLIGHT
-			if ((self.followAbstractCreature.realizedCreature as Player).GetCat().defector)
-				spotlightMode = true;
-
-            //THIS CHUNK IS REJOINING THE NON-SPOTLIGHT RUNNING BECAUSE FORCED DEFECTOR SPOTLIGHTS SHOULD CHECK TO AUTO REJOING
-            float maxLeft = spotlightMode ? float.MaxValue : origBodyPos.x;
-            float maxRight = spotlightMode ? 0f : origBodyPos.x;
-            float maxDown = spotlightMode ? float.MaxValue : origBodyPos.y;
-            float maxUp = spotlightMode ? 0f : origBodyPos.y;
-			float totalX = 0f;
-			float totalY = 0f;
-			int totalCnt = 0;
-            int unPiped = 0;
-			//CHECK EACH VECTOR TO SEE WHO IS AT THE FURTHEST CORNERS
-			for (int i = 0; i < self.room.game.Players.Count; i++)
-			{
-				Player plr = self.room.game.Players[i].realizedCreature as Player;
-				if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room)
-				{
-					//IF WE'RE A DEFECTOR, CHECK TO SEE IF WE CAN REJOIN THE GROUP REAL QUICK
-					if (plr.GetCat().defector && plr.GetCat().justDefected <= 0 
-                        && plr.room == GetFirstUndefectedPlayer(self.room.game)?.room //ALSO, WE CAN'T REJOIN IF WE AREN'T IN THE SAME ROOM, DUMBO //self.room.game.cameras[0].room
-                        && plr.GetCat().pipeType != "other") //DON'T TRACK IN SHORTCUTS, SINCE IT SEEMS THE GAME WILL CHECK YOUR POSITION FROM THE PREVIOUS ROOM. SNEAKY LITTLE SHITE...
-					{
-                        //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325)
-                        //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f * 2f * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325 * 2f * (1f / GetWidestCameraZoom())) //self.lastPos
-                        //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 650f * 2f * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 325 * 2f * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y)
-                        //if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < 1300 && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < 700) //I GIVE UP... THIS IS THE BEST I CAN DO
-                        //OKAY IT'S NOT PERFECT, I THINK SOME OF THESE VALUES NEED TO BE MULTIPLIED BY THE GETWIDESTCAMERAZOOM MODIFIER AS WELL, BUT IT'S WAAAY BETTER THAN IT USED TO BE
-                        if (Mathf.Abs(plr.mainBodyChunk.pos.x - lastCamPos.x) < (GetRejoinMargins(ScreenLimit().x * ScreenSizeMod().x) - (xDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()) && Mathf.Abs(plr.mainBodyChunk.pos.y - lastCamPos.y) < (GetRejoinMargins(ScreenLimit().y * ScreenSizeMod().y) - (yDistanceMemory / 2f)) * (1f / GetWidestCameraZoom()))
-                        {
-                            plr.GetCat().defector = false;
-                            Debug.Log("UNDEFECTING " + plr.playerState.playerNumber);
-                            //IF WE HAD BEEN FORCED OUT OF OUR GROUP, WE CAN AUTO-REJOIN OUT OF SPOTLIGHT MODE
-                            if (plr.GetCat().forcedDefect && spotlightMode)
+                            if (plr != null && plr.GetCat().camProtection <= 0 && !plr.GetCat().defector && self.room?.abstractRoom == self.room.game.Players[i].Room)
                             {
-                                spotlightMode = false;
-                                plr.GetCat().forcedDefect = false;
-                                plr.GetCat().camProtection = 40;
-                            }
-                            
-                            //IF THE OFF-CAMERA FROM SPLITSCREEN WAS FOCUSED ON US, UN-SPLIT THE CAMERAS. YES WE NEED TO DO THIS RIGHT NOW OTHERWISE IT WILL MESS UP THE DEFECTOR CALCULATIONS BELOW
-                            if (SplitScreenActive() && self.room?.game?.cameras[1]?.followAbstractCreature?.realizedCreature == plr)
-                            {
-                                SplitscreenUpdate(self.room?.game);
-                            }
-                        }
-					}
-
-                    //SKIP THIS CHECK IF WE ARE TRANSITIONING BETWEEN ROOMS. OUR UPDATES ARE STILL FROM THE PREVIOUS ROOM
-                    //NEW RULE! IN SPOTLIGHT MODE, THE SPOTLIGHTED PLAYER IS EXEMPT FROM THIS CALCULATION (SO THEIR MOVEMENT DOESN'T DEFECT OTHER PLAYERS WAITING IN THE MAIN GROUP
-                    if (!plr.GetCat().defector && plr.GetCat().pipeType != "other" && plr.mainBodyChunk != null) 
-					{
-						Vector2 plrPos = plr.mainBodyChunk.pos;
-						if (plrPos.x < maxLeft)
-							maxLeft = plrPos.x;
-						if (plrPos.x > maxRight)
-							maxRight = plrPos.x;
-						if (plrPos.y < maxDown)
-							maxDown = Mathf.Max(plrPos.y, 0); //DON'T PAN INTO DEATH PITS
-						if (plrPos.y > maxUp)
-							maxUp = plrPos.y;
-								
-						//KEEP TRACK OF THESE STATS. WE'LL AVERAGE OUT THE POSITIONS OF EVERYONE SHORTLY
-                        //ACTUALLY, SPOTLIGHTED PLAYERS CAN RUN THE ABOVE STUFF SO THEY STILL GET DEFECTED BUT THEY WON'T CONTRIBUTE TOWARDS THE GROUP AVERAGE POSITION
-                        if (!(spotlightMode && self.followAbstractCreature == plr.abstractCreature))
-                        {
-                            totalX += plrPos.x;
-                            totalY += plrPos.y;
-                            totalCnt++;
-                        }
-                        //Debug.Log("WHO THIS? " + plr.playerState.playerNumber + " - " + plrPos);
-                    }
-
-                    //if ((spotlightMode && self.followAbstractCreature == plr.abstractCreature))
-                        //Debug.Log("THAT'S MEEE " + plr.GetCat().defector + " - " + plr.GetCat().pipeType + " - " + !(spotlightMode && self.followAbstractCreature == plr.abstractCreature));
-
-                    if (plr.GetCat().pipeType != "normal") //!plr.inShortcut
-                    {
-                        unPiped++; //KEEP TRACK OF THIS. WE NEED TO KNOW IF IT'S 0
-                    }
-                }
-			}
-            groupFocusCount = totalCnt;
-            //Debug.Log("CAM STATS " + " FOLLOW: " + self.followAbstractCreature.realizedCreature + " - ROOM: " + self.followAbstractCreature.Room.name);
-
-            //FIND THE HIGHEST PLAYER ON SCREEN
-            if (self.room.abstractRoom == self.followAbstractCreature.Room) //OKAY APPARENTLY THE GAME WILL TRY AND RUN THIS WHILE self.room.abstractRoom DOES NOT MATCH self.followAbstractCreature WHICH IS SUPER WEIRD
-            {
-                for (int i = 0; i < self.room.game.Players.Count; i++)
-                {
-                    Player plr = self.room.game.Players[i].realizedCreature as Player;
-                    if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut && !plr.GetCat().defector)
-                    {
-                        if (unPiped > 0 && (plr.mainBodyChunk.pos.y == maxUp) && maxUp > origBodyPos.y + 50)//self.followAbstractCreature.pos.y < maxUp - 50) //REMEMBER THIS CREATURE, WE MIGHT NEED TO SWAP TO THEM LATER
-                        {
-                            swapFollower ??= plr.abstractCreature; //OH IT CAN'T BE JUST ANY CREATURE. IT NEEDS TO BE THE HIGHEST CREATURE, I THINK...
-                            //Debug.Log("SWAP " + plr.mainBodyChunk.pos.y + " FOLLOW: " + origBodyPos.y + " - ROOM: " + self.room.game.Players[i].Room.name);
-                        }
-                    }
-                }
-            }
-
-
-            //SKIP THE REST OF THIS CHECK IF EVERYONE IS IN A SHORTCUT. JUST RUN IT AS NORMAL
-            if (unPiped != 0)  //!spotlightMode
-            {
-
-                //IF WE'RE FOCUSED ON SOMEONE IN A PIPE, QUICKLY SWITCH IT TO THE FIRST AVAILABLE NON-PIPE PLAUER
-                if ((self.followAbstractCreature.realizedCreature as Player).inShortcut && !(TwoPlayerSplitscreenMode() && MultiScreens())) //EXCEPT IF THE SCREEN IS SPLIT IN 2P SPLITSCREEN MODE
-                {
-                    for (int i = 0; i < self.room.game.Players.Count; i++)
-                    {
-                        Player plr = self.room.game.Players[i].realizedCreature as Player;
-                        if (plr != null && !plr.dead && self.room.abstractRoom == self.room.game.Players[i].Room && !plr.inShortcut)
-                            swapFollower ??= plr.abstractCreature; //LITERALLY JUST ANYONE. THE GAME CAN SORT IT OUT NEXT TICK IF THAT'S A PROBLEM
-                    }
-                }
-
-                if (SmartCameraActive()) //camScrollEnabled
-                {
-                    if (unPiped == 1 || spotlightMode) // || MultiScreens()) //WE SKIP SOME OF THE IMPORTANT MAXLEFT/RIGHT CALCULATIONS IN SPOTLIGHT MODE, OOPS
-                        SBCameraZoom(self, 0f, 0f);
-                    else
-                        SBCameraZoom(self, Mathf.Abs(maxLeft - maxRight), Mathf.Abs(maxUp - maxDown));
-                }
-
-                //Debug.Log("RUNNING THE THING " + maxLeft + " - " + maxRight + " - " + maxUp + " - " + maxDown + " - ");
-
-                //CHECK FOR DEFECTORS, PLAYERS WHO HAVE STRAYED TOO FAR FROM THE GROUP AVERAGE IN EITHER THE X OR Y AXIS
-                float avgX = totalX / totalCnt;
-                float avgY = totalY / totalCnt;
-                Player mostBehindPlayer = null;
-                float mostBehind = 0;
-                float xLimit = (ScreenLimit().x * marginsMult) * (1f / GetWidestCameraZoom()) * ScreenSizeMod().x; //1300
-                float yLimit = (ScreenLimit().y * marginsMult) * (1f / GetWidestCameraZoom()) * ScreenSizeMod().y; //700
-                xDistanceMemory = Mathf.Abs(maxLeft - maxRight);
-                yDistanceMemory = Mathf.Abs(maxUp - maxDown);
-
-                //X LIMIT
-                if (Mathf.Abs(maxLeft - maxRight) > xLimit)
-                {
-                    for (int i = 0; i < self.room.game.Players.Count; i++)
-                    { //DO IT AGAIN....
-                        Player plr = self.room.game.Players[i].realizedCreature as Player;
-                        if (plr != null && plr.GetCat().camProtection <= 0 && !plr.GetCat().defector && self.room?.abstractRoom == self.room.game.Players[i].Room)
-                        {
-                            float myBehind = Mathf.Abs(plr.mainBodyChunk.pos.x - avgX);
-                            if (plr.GetCat().pipeType == "other" || plr.dangerGraspTime > 30 || plr.dead)
-                                myBehind *= 1.35f; //PLAYERS THAT ARE GRABBED OR IN A SHORTCUT GET HIGHER PRIORITY FOR BEING CHOSEN AS DEFECTOR
-                            if (myBehind > mostBehind)
-                            {
-                                mostBehindPlayer = plr;
-                                mostBehind = myBehind;
+                                float myBehind = Mathf.Abs(plr.mainBodyChunk.pos.y - avgY);
+                                if (plr.GetCat().pipeType == "other" || plr.dangerGraspTime > 30 || plr.dead)
+                                    myBehind *= 1.35f; //PLAYERS THAT ARE GRABBED OR IN A SHORTCUT GET HIGHER PRIORITY FOR BEING CHOSEN AS DEFECTOR
+                                if (myBehind > mostBehind)
+                                {
+                                    mostBehindPlayer = plr;
+                                    mostBehind = myBehind;
+                                }
                             }
                         }
                     }
-                }
-                //Y LIMIT
-                else if (Mathf.Abs(maxUp - maxDown) > yLimit)
-                {
-                    for (int i = 0; i < self.room.game.Players.Count; i++)
-                    { //DO IT AGAIN....
-                        Player plr = self.room.game.Players[i].realizedCreature as Player;
-                        if (plr != null && plr.GetCat().camProtection <= 0 && !plr.GetCat().defector && self.room?.abstractRoom == self.room.game.Players[i].Room)
-                        {
-                            float myBehind = Mathf.Abs(plr.mainBodyChunk.pos.y - avgY);
-                            if (plr.GetCat().pipeType == "other" || plr.dangerGraspTime > 30 || plr.dead)
-                                myBehind *= 1.35f; //PLAYERS THAT ARE GRABBED OR IN A SHORTCUT GET HIGHER PRIORITY FOR BEING CHOSEN AS DEFECTOR
-                            if (myBehind > mostBehind)
-                            {
-                                mostBehindPlayer = plr;
-                                mostBehind = myBehind;
-                            }
-                        }
-                    }
-                }
 
-                //CROWN THE BIGGEST DEFFECTOR
-                if (mostBehindPlayer != null)
-                {
-                    mostBehindPlayer.GetCat().defector = true;
-                    mostBehindPlayer.GetCat().justDefected = 20;
-                    if (!spotlightMode) //DON'T APPLY THIS IN SPOTLIGHT MODE OR IT WOULD APPLY TO PLAYERS WHO TAKE SPOTLIGHT AND WALK AWAY
+                    //CROWN THE BIGGEST DEFFECTOR
+                    if (mostBehindPlayer != null)
                     {
-                        mostBehindPlayer.GetCat().forcedDefect = true;
-                        if (!CLOptions.autoSplitScreen.Value)
-                            mostBehindPlayer.GetCat().deniedSplitCam = true; //AUTO DENY THE SPLIT CAM. THEY CAN CALL CAM IF THEY REALLY NEED IT
-                    }
+                        mostBehindPlayer.GetCat().defector = true;
+                        mostBehindPlayer.GetCat().justDefected = 20;
+                        if (!spotlightMode) //DON'T APPLY THIS IN SPOTLIGHT MODE OR IT WOULD APPLY TO PLAYERS WHO TAKE SPOTLIGHT AND WALK AWAY
+                        {
+                            mostBehindPlayer.GetCat().forcedDefect = true;
+                            if (!CLOptions.autoSplitScreen.Value)
+                                mostBehindPlayer.GetCat().deniedSplitCam = true; //AUTO DENY THE SPLIT CAM. THEY CAN CALL CAM IF THEY REALLY NEED IT
+                        }
                         
-                    if (mostBehindPlayer.abstractCreature == self.followAbstractCreature)
-                    {
-                        if (self.hud?.jollyMeter != null)
-                            self.hud.jollyMeter.customFade = 10f; //SHOW THE HUD FOR A SECOND SO THEY KNOW THINGS CHANGED
-                        mostBehindPlayer.GetCat().noCam = CLOptions.camPenalty.Value * 40; //GIVE THEM A CAM DELAY
+                        if (mostBehindPlayer.abstractCreature == self.followAbstractCreature)
+                        {
+                            if (self.hud?.jollyMeter != null)
+                                self.hud.jollyMeter.customFade = 10f; //SHOW THE HUD FOR A SECOND SO THEY KNOW THINGS CHANGED
+                            mostBehindPlayer.GetCat().noCam = CLOptions.camPenalty.Value * 40; //GIVE THEM A CAM DELAY
+                        }
                     }
-                }
 
-                //WTF IS SBCAMERASCROLL DOING?!?! WHY DOES THE FOCUS CREATURE NOT ALLOW CAMERA POS TO EVER GO ABOVE THEM!!! STUPIT.
-                //if (!spotlightMode && unPiped > 1 && self.followAbstractCreature.realizedCreature.mainBodyChunk.pos.y > maxDown) // && maxDown < maxUp - 50)
-                //    requestSwap = true;
+                    //WTF IS SBCAMERASCROLL DOING?!?! WHY DOES THE FOCUS CREATURE NOT ALLOW CAMERA POS TO EVER GO ABOVE THEM!!! STUPIT.
+                    //if (!spotlightMode && unPiped > 1 && self.followAbstractCreature.realizedCreature.mainBodyChunk.pos.y > maxDown) // && maxDown < maxUp - 50)
+                    //    requestSwap = true;
 
 
-                //SHIFT THE PLAYER
-                float shift = 0.5f;
-                Vector2 adjPosition = new Vector2(Mathf.Lerp(maxLeft, maxRight, shift), Mathf.Lerp(maxDown, maxUp, shift));
-                lastCamPos = adjPosition;
+                    //SHIFT THE PLAYER
+                    float shift = 0.5f;
+                    Vector2 adjPosition = new Vector2(Mathf.Lerp(maxLeft, maxRight, shift), Mathf.Lerp(maxDown, maxUp, shift));
+                    lastCamPos = adjPosition;
 
-                if (!spotlightMode)
-                {
-                    //OKAY NEW PLAN. TAKE THE DISTANCE WE ARE SUPPOSED TO TRAVEL, AND DOUBLE IT
-                    (self.followAbstractCreature.realizedCreature as Player).GetCat().bodyPosMemory = Vector2.Lerp(self.followAbstractCreature.realizedCreature.bodyChunks[0].pos, self.followAbstractCreature.realizedCreature.bodyChunks[1].pos, 0.33333334f);
-                    Vector2 slingShot = adjPosition - self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
-                    self.followAbstractCreature.realizedCreature.mainBodyChunk.pos += new Vector2(slingShot.x * 2f, slingShot.y * (turple)); //WAIT IM SO CONFUSED... DOES ONLY THE X NEED TO BE DOUBLED???
-                    (self.followAbstractCreature.realizedCreature as Player).GetCat().bodyPosMemory.y = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos.y - (slingShot.y * 1f); //ADJUST THIS TOO
-                    shiftBody = true;
-                }
-			}
+                    if (!spotlightMode)
+                    {
+                        //OKAY NEW PLAN. TAKE THE DISTANCE WE ARE SUPPOSED TO TRAVEL, AND DOUBLE IT
+                        (self.followAbstractCreature.realizedCreature as Player).GetCat().bodyPosMemory = Vector2.Lerp(self.followAbstractCreature.realizedCreature.bodyChunks[0].pos, self.followAbstractCreature.realizedCreature.bodyChunks[1].pos, 0.33333334f);
+                        Vector2 slingShot = adjPosition - self.followAbstractCreature.realizedCreature.mainBodyChunk.pos;
+                        self.followAbstractCreature.realizedCreature.mainBodyChunk.pos += new Vector2(slingShot.x * 2f, slingShot.y * (turple)); //WAIT IM SO CONFUSED... DOES ONLY THE X NEED TO BE DOUBLED???
+                        (self.followAbstractCreature.realizedCreature as Player).GetCat().bodyPosMemory.y = self.followAbstractCreature.realizedCreature.mainBodyChunk.pos.y - (slingShot.y * 1f); //ADJUST THIS TOO
+                        shiftBody = true;
+                    }
+			    }
+            }
         }
-
         orig(self);
         
         if (tickClock > 0)
@@ -1094,6 +1105,7 @@ public partial class CoopLeash : BaseUnityPlugin
             self.ChangeCameraToPlayer(swapFollower); //BUT THEY MIGHT NOT BE IN THE SAME ROOM. NITWIT
             //ABSOLUTELY STUPIT
         }
+        
 
         //SHOW THE BEACON FX AROUND THE PIPE
         Creature creature = (self.followAbstractCreature != null) ? self.followAbstractCreature.realizedCreature : null;
@@ -1271,8 +1283,8 @@ public partial class CoopLeash : BaseUnityPlugin
 
         return new Vector2(xScale, yScale);
     }
-	
-	public static bool SplitByRoom = false;
+
+    public static bool SplitByRoom = false;
 
     public void SplitscreenUpdate(RainWorldGame self)
     {
@@ -1281,12 +1293,12 @@ public partial class CoopLeash : BaseUnityPlugin
          
         if (true) //self.cameras.Length > 1)
         {
-            //IN 2 PLAYER SPLITSCREEN MODE, KEEP THE CAMERA NUMBERS CONSISTANT
+            //IN 2 PLAYER SPLITSCREEN MODE, KEEP THE CAMERA NUMBERS CONSISTANT (UNLESS ONE IS DEAD, DUMMY!)
             if (TwoPlayerSplitscreenMode())
             {
                 Player plr1 = self.Players[0].realizedCreature as Player;
                 Player plr2 = self.Players[1].realizedCreature as Player;
-                if (plr1 != null && plr2 != null && plr1.GetCat().defector)
+                if (plr1 != null && plr2 != null && !plr1.dead && plr1.GetCat().defector)
                 {
                     plr1.GetCat().defector = false;
                     plr2.GetCat().defector = true;
@@ -1384,10 +1396,23 @@ public partial class CoopLeash : BaseUnityPlugin
             {
                 Player plr1 = self.Players[0].realizedCreature as Player;
                 Player plr2 = self.Players[1].realizedCreature as Player;
-                if (self.cameras[0]?.followAbstractCreature != plr1?.abstractCreature)
-                    self.cameras[0].ChangeCameraToPlayer(plr1.abstractCreature);
-                if (self.cameras[1]?.followAbstractCreature != plr2?.abstractCreature)
-                    self.cameras[1].ChangeCameraToPlayer(plr2.abstractCreature);
+                if (!plr1.dead)
+                {
+                    if (self.cameras[0]?.followAbstractCreature != plr1?.abstractCreature)
+                        self.cameras[0].ChangeCameraToPlayer(plr1.abstractCreature);
+                    if (self.cameras[1]?.followAbstractCreature != plr2?.abstractCreature)
+                        self.cameras[1].ChangeCameraToPlayer(plr2.abstractCreature);
+                }
+            }
+
+            //UNDO THE ANNOYING ZOOM FEATURE SPLITSCREEN ADDED
+            for (int i = 0; i < 2; i++)
+            {
+                if (SplitScreenCoop.SplitScreenCoop.cameraZoomed[i])
+                {
+                    //SplitScreenCoop.SplitScreenCoop.SetCameraZoom(cam, false); //HUH?? WHY NOT??
+                    UnityEngine.Object.FindObjectOfType<SplitScreenCoop.SplitScreenCoop>().SetCameraZoom(self.cameras[i], false); //IS THIS REALLY HOW I GOTTA DO IT? GUESS SO...
+                } 
             }
         }
     }
@@ -1722,7 +1747,7 @@ public partial class CoopLeash : BaseUnityPlugin
         self.GetCat().deniedSplitCam = true;
         self.GetCat().defector = true;
         // RainWorldGame myGame = self?.room?.game;
-		cleanupDefectorFlag = true;
+        cleanupDefectorFlag = true;
 
         orig(self);
     }
@@ -1753,7 +1778,7 @@ public partial class CoopLeash : BaseUnityPlugin
                 }
                 else //GOOFY...
                     sameRoomCount--;
-                
+
                 //Debug.Log("CLEANUP DEFECTORS: " + plr.playerState.playerNumber + " - " + plr.GetCat().lastRoom + " - " + plr.GetCat().pipeType);
             }
         }
@@ -2134,10 +2159,6 @@ public partial class CoopLeash : BaseUnityPlugin
     }
 
 
-    public static IntVector2 shortCutBeacon = new IntVector2(0, 0);
-    public static Room beaconRoom;
-    public static int groupFocusCount = 0;
-
     private void ShortCutVessel_ctor(On.ShortcutHandler.ShortCutVessel.orig_ctor orig, ShortcutHandler.ShortCutVessel self, IntVector2 pos, Creature creature, AbstractRoom room, int wait) {
 
         if (CLOptions.waitForAll.Value && creature is Player player  && !player.isNPC && wait > 0 && player.enteringShortCut == shortCutBeacon) {
@@ -2169,6 +2190,11 @@ public partial class CoopLeash : BaseUnityPlugin
         }
     }
 
+    private void WarpPoint_NewWorldLoaded_Room(On.Watcher.WarpPoint.orig_NewWorldLoaded_Room orig, Watcher.WarpPoint self, Room newRoom)
+    {
+        orig(self, newRoom);
+        WipeBeacon("WarpPoint.NewWorldLoaded"); //WIPE THE OLD BEACON AS WE ENTER A PORTAL
+    }
 
 
     private void RainWorldGameOnShutDownProcess(On.RainWorldGame.orig_ShutDownProcess orig, RainWorldGame self)
